@@ -168,24 +168,77 @@ typedb-embedded (same Rust API)
     ↓  (direct function calls, no serialization)
 database/ query/ storage/ ...
     ↓
-RocksDB
+kv::KVStore trait
+    ↓
+RocksKVStore (default) ─or─ RedbKVStore (future)
 ```
 
 The key insight is that the remote driver's API is a thin wrapper around gRPC calls, while the engine's internal `DatabaseManager`, `TransactionRead/Write/Schema`, and `QueryManager` already provide the same functionality as direct function calls. `typedb-embedded` bridges these two, translating the driver API into engine calls.
 
+### KV Storage Abstraction Layer (from `origin/storage-extraction`)
+
+The `storage-extraction` branch introduces a new `kv` crate that extracts all RocksDB-specific code behind generic traits. This is the foundation for pluggable storage backends:
+
+```rust
+// kv/lib.rs — the core abstraction
+pub trait KVStore: 'static {
+    type SharedResources;
+    type OpenOptions;
+    type RangeIterator: KVStoreRangeIterator;
+    type WriteBatch: KVWriteBatch;
+
+    fn open(options: &Self::OpenOptions, name: &'static str, id: KVStoreID) -> Result<Self, _>;
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), _>;
+    fn get<M, V>(&self, key: &[u8], mapper: &mut M) -> Result<Option<V>, _>;
+    fn get_prev<M, T>(&self, key: &[u8], mapper: &mut M) -> Option<T>;
+    fn iterate_range(&self, range: &KeyRange<_>, counters: StorageCounters) -> Self::RangeIterator;
+    fn write(&self, write_batch: Self::WriteBatch) -> Result<(), _>;
+    fn checkpoint(&self, checkpoint_dir: &Path) -> Result<(), _>;
+    fn delete(self) -> Result<(), _>;
+    fn reset(&mut self) -> Result<(), _>;
+    // ...
+}
+
+pub trait KVWriteBatch: Default {
+    fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>);
+}
+
+pub trait KVStoreRangeIterator:
+    for<'a> LendingIterator<Item<'a> = KVIteratorItem<'a>> + Seekable<[u8]> { ... }
+```
+
+**Propagation of the `KV` generic** through the engine:
+- `MVCCStorage<D>` → `MVCCStorage<D, KV: KVStore>` (storage layer)
+- `Keyspaces` → `Keyspaces<KV>` (keyspace management)
+- `WriteBatches` → `WriteBatches<KV>` (write batch collection)
+- `ReadSnapshot<D>` → `ReadSnapshot<D, KV>` / `WriteSnapshot<D, KV>` / `SchemaSnapshot<D, KV>`
+- `ReadableSnapshot` → `ReadableSnapshot<KV>`, `WritableSnapshot<KV>`, `CommittableSnapshot<D, KV>`
+- `MVCCRangeIterator` → `MVCCRangeIterator<KV>`
+- Functions taking `&impl ReadableSnapshot` now take `&impl ReadableSnapshot<KV>` (e.g., in `encoding/`, `function/`)
+
+**Key removals:**
+- `IteratorPool` (was RocksDB-specific `DBRawIterator` pooling) — iterator pooling now lives inside `kv::rocks`
+- `storage::key_range::KeyRange` moved to `primitive::key_range::KeyRange`
+- `Keyspace` struct removed — `Keyspaces<KV>` now holds `Vec<KV>` directly
+- `KeyspaceSet::rocks_configuration()` removed — configuration now handled by `KV::create_open_options()`
+
+The existing `kv::rocks::RocksKVStore` implements all traits, so no behavioral changes — just the abstraction boundary.
+
 ### Dependency Graph
 ```
 typedb-embedded
-    ├── database     (DatabaseManager, Database<WALClient>, Transaction*)
+    ├── database     (DatabaseManager, Database<WALClient, KV>, Transaction*)
     ├── query        (QueryManager)
     ├── compiler     (query compilation)
     ├── executor     (query execution)
     ├── ir           (intermediate representation)
     ├── concept      (type system)
     ├── function     (built-in + user-defined functions)
-    ├── storage      (MVCCStorage, snapshots)
+    ├── storage      (MVCCStorage<D, KV>, snapshots)
+    ├── kv           (KVStore trait + RocksKVStore impl)
     ├── durability   (WAL)
     ├── encoding     (key encoding, keyspaces)
+    ├── primitive    (KeyRange, bytes utilities)
     ├── resource     (constants, config)
     ├── answer       (internal result types)
     ├── common/*     (error, logger, bytes, concurrency, etc.)
@@ -745,12 +798,43 @@ pub async fn transaction(&self, database_name: impl AsRef<str>, transaction_type
 
 ```toml
 [features]
-default = []
+default = ["rocksdb"]
 sync = []                     # Sync API (no async runtime needed)
 diagnostics = ["diagnostics"] # Include TypeDB diagnostics/metrics
+rocksdb = ["kv/rocks"]        # RocksDB storage backend (default)
+redb = ["kv/redb"]            # redb storage backend (future — see below)
 ```
 
 The `sync` feature mirrors the remote driver's `sync` feature, selecting between async and sync Promise/Stream implementations.
+
+### Storage Backend Selection
+
+With the `kv::KVStore` trait abstraction (from `storage-extraction`), the embedded driver can support multiple storage backends via feature flags. The `typedb-embedded` crate parameterizes on `KV`:
+
+```rust
+// In typedb-embedded, the concrete KV backend is selected at compile time:
+#[cfg(feature = "rocksdb")]
+type DefaultKV = kv::rocks::RocksKVStore;
+
+#[cfg(feature = "redb")]
+type DefaultKV = kv::redb::RedbKVStore;  // future
+
+// All internal types are instantiated with this:
+// Database<WALClient, DefaultKV>, MVCCStorage<WALClient, DefaultKV>, etc.
+```
+
+**redb backend implementation** (future `kv/redb/` module) would need to implement:
+- `KVStore for RedbKVStore` — map to redb's `ReadTransaction`/`WriteTransaction` + `Table`
+- `KVWriteBatch for RedbWriteBatch` — buffer puts, flush on `KVStore::write()`
+- `KVStoreRangeIterator for RedbRangeIterator` — wrap redb's `Range` iterator, implement `LendingIterator + Seekable`
+- `KVStoreError for RedbKVError` — wrap `redb::Error` variants
+
+Key redb considerations:
+- redb uses MVCC natively but exposes it differently (read transactions see a snapshot)
+- redb has no WAL — durability is built-in via its copy-on-write B-tree
+- redb has no bloom filters or prefix extractors — `prefix_length` in `KVStore::create_open_options()` would be ignored
+- redb is pure Rust and compiles to iOS/WASM — enables Phase 2/3 from `embedded-ios-storage-analysis.md`
+- `checkpoint()` would need a different strategy (redb doesn't have RocksDB-style checkpoints)
 
 ---
 
@@ -766,8 +850,10 @@ ir = { path = "../ir" }
 concept = { path = "../concept" }
 function = { path = "../function" }
 storage = { path = "../storage" }
+kv = { path = "../kv" }             # KVStore trait + backend impls
 durability = { path = "../durability" }
 encoding = { path = "../encoding" }
+primitive = { path = "../common/primitive" }  # KeyRange (moved from storage)
 answer = { path = "../answer" }
 resource = { path = "../resource" }
 options = { path = "../common/options" }
@@ -857,3 +943,16 @@ This is **not** part of the initial design — it would be a future enhancement 
 5. **Crate publishing:** Should `typedb-embedded` live in the `typedb/typedb` repo (alongside the engine) or in `typedb/typedb-driver` (alongside the remote driver)? Recommendation: in `typedb/typedb` since it depends heavily on engine internals and should be versioned with the engine.
 
 6. **Logging initialization:** The engine uses `tracing`. The embedded driver should not call `initialise_logging_global()` — let the host application configure its own tracing subscriber. Provide an optional `TypeDBDriver::init_logging(dir)` method for convenience.
+
+7. **KV generic propagation strategy:** The `storage-extraction` branch makes `KV` a generic parameter throughout the engine (`ReadableSnapshot<KV>`, `WritableSnapshot<KV>`, etc.). The embedded driver must choose how to handle this:
+   - **Option A (type alias):** Fix the KV backend at compile time via `type DefaultKV = RocksKVStore` and use concrete types everywhere. Simpler but requires recompilation to switch backends.
+   - **Option B (generic driver):** Make `TypeDBDriver<KV: KVStore>` generic and let the user specify the backend. More flexible but infects the public API with an engine-internal generic.
+   - **Recommendation:** Option A — use a compile-time feature flag (`rocksdb` vs `redb`) to select a type alias. The driver's public API stays clean and matches the remote driver exactly.
+
+8. **redb durability integration:** The engine's WAL (`DurabilityClient`) provides crash recovery by replaying committed operations. redb has its own built-in durability (ACID via copy-on-write B-trees). When using a redb backend:
+   - Should the WAL be disabled entirely? redb guarantees durability without it.
+   - If WAL is disabled, `checkpoint()` and recovery code paths become no-ops.
+   - This may require a `NullDurabilityClient` or making `DurabilityClient` optional.
+   - The `DurabilityClient` trait already exists as a generic parameter `D` — a `NullDurabilityClient` that implements it as no-ops would be the cleanest approach.
+
+9. **`storage-extraction` branch merge status:** The `storage-extraction` branch (`origin/storage-extraction`) is not yet merged to master. The embedded driver design should be implemented **after** this branch lands, as it provides the `kv::KVStore` abstraction that makes pluggable backends possible. Without it, supporting redb would require invasive changes to the storage layer.
