@@ -38,12 +38,12 @@ pub const fn increment_fixed<const SIZE: usize>(mut bytes: [u8; SIZE]) -> [u8; S
     while index > 0 {
         let (val, overflow) = bytes[index - 1].overflowing_add(1);
         bytes[index - 1] = val;
-        if overflow {
-            panic!("Overflow while incrementing array")
+        if !overflow {
+            return bytes;
         }
         index -= 1;
     }
-    bytes
+    panic!("Overflow while incrementing array")
 }
 
 #[derive(Debug)]
