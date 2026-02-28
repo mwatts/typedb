@@ -82,3 +82,184 @@ impl IntoResponse for HttpServiceError {
 pub(crate) fn encode_error(error: HttpServiceError) -> ErrorResponse {
     ErrorResponse { code: error.root_source_typedb_error().code().to_string(), message: error.format_source_trace() }
 }
+
+#[cfg(test)]
+mod tests {
+    use http::StatusCode;
+
+    use super::*;
+
+    fn get_response_status(err: HttpServiceError) -> StatusCode {
+        let response = err.into_response();
+        response.status()
+    }
+
+    // --- Simple error variants status codes ---
+
+    #[test]
+    fn internal_error_returns_500() {
+        assert_eq!(get_response_status(HttpServiceError::Internal { details: "boom".to_string() }), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn json_body_expected_returns_400() {
+        assert_eq!(get_response_status(HttpServiceError::JsonBodyExpected { details: "bad json".to_string() }), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn request_timeout_returns_408() {
+        assert_eq!(get_response_status(HttpServiceError::RequestTimeout {}), StatusCode::REQUEST_TIMEOUT);
+    }
+
+    #[test]
+    fn not_found_returns_404() {
+        assert_eq!(get_response_status(HttpServiceError::NotFound {}), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn unknown_version_returns_404() {
+        assert_eq!(get_response_status(HttpServiceError::UnknownVersion { version: "v99".to_string() }), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn missing_path_parameter_returns_404() {
+        assert_eq!(
+            get_response_status(HttpServiceError::MissingPathParameter { parameter: "id".to_string() }),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[test]
+    fn invalid_path_parameter_returns_400() {
+        assert_eq!(
+            get_response_status(HttpServiceError::InvalidPathParameter { parameter: "id".to_string() }),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    // --- State error variants ---
+
+    #[test]
+    fn state_unimplemented_returns_501() {
+        let err = HttpServiceError::State {
+            typedb_source: ServerStateError::Unimplemented { description: "not done".to_string() },
+        };
+        assert_eq!(get_response_status(err), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[test]
+    fn state_operation_not_permitted_returns_403() {
+        assert_eq!(get_response_status(HttpServiceError::operation_not_permitted()), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn state_database_not_exist_returns_404() {
+        let err = HttpServiceError::State {
+            typedb_source: ServerStateError::DatabaseDoesNotExist { name: "testdb".to_string() },
+        };
+        assert_eq!(get_response_status(err), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn state_user_not_exist_returns_404() {
+        let err = HttpServiceError::State { typedb_source: ServerStateError::UserDoesNotExist {} };
+        assert_eq!(get_response_status(err), StatusCode::NOT_FOUND);
+    }
+
+    // --- Transaction error variants ---
+
+    #[test]
+    fn transaction_database_not_found_returns_404() {
+        let err = HttpServiceError::Transaction {
+            typedb_source: TransactionServiceError::DatabaseNotFound { name: "testdb".to_string() },
+        };
+        assert_eq!(get_response_status(err), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn transaction_cannot_commit_read_returns_400() {
+        let err = HttpServiceError::Transaction {
+            typedb_source: TransactionServiceError::CannotCommitReadTransaction {},
+        };
+        assert_eq!(get_response_status(err), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn transaction_no_open_returns_404() {
+        assert_eq!(get_response_status(HttpServiceError::no_open_transaction()), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn transaction_timeout_returns_408() {
+        assert_eq!(get_response_status(HttpServiceError::transaction_timeout()), StatusCode::REQUEST_TIMEOUT);
+    }
+
+    #[test]
+    fn query_close_returns_400() {
+        let err = HttpServiceError::QueryClose {
+            typedb_source: TransactionServiceError::NoOpenTransaction {},
+        };
+        assert_eq!(get_response_status(err), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn query_commit_returns_400() {
+        let err = HttpServiceError::QueryCommit {
+            typedb_source: TransactionServiceError::CannotCommitReadTransaction {},
+        };
+        assert_eq!(get_response_status(err), StatusCode::BAD_REQUEST);
+    }
+
+    // --- encode_error ---
+
+    #[test]
+    fn encode_error_simple() {
+        let err = HttpServiceError::Internal { details: "oops".to_string() };
+        let resp = encode_error(err);
+        assert_eq!(resp.code, "HSR1");
+        assert!(resp.message.contains("Internal error"));
+    }
+
+    #[test]
+    fn encode_error_nested_uses_root_source_code() {
+        let err = HttpServiceError::operation_not_permitted();
+        let resp = encode_error(err);
+        // Root source is the ServerStateError, not the HttpServiceError wrapper
+        assert_eq!(resp.code, "SRV2");
+        assert!(resp.message.contains("not permitted"));
+    }
+
+    #[test]
+    fn encode_error_transaction_uses_root_source_code() {
+        let err = HttpServiceError::no_open_transaction();
+        let resp = encode_error(err);
+        assert_eq!(resp.code, "TSV12");
+    }
+
+    // --- ErrorResponse serde ---
+
+    #[test]
+    fn error_response_serialization() {
+        let resp = ErrorResponse { code: "TST01".to_string(), message: "Something went wrong".to_string() };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"code\":\"TST01\""));
+        assert!(json.contains("\"message\":\"Something went wrong\""));
+    }
+
+    #[test]
+    fn error_response_deserialization() {
+        let json = r#"{"code":"ERR42","message":"Bad input"}"#;
+        let resp: ErrorResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.code, "ERR42");
+        assert_eq!(resp.message, "Bad input");
+    }
+
+    #[test]
+    fn error_response_roundtrip() {
+        let resp = ErrorResponse { code: "HSR01".to_string(), message: "Internal error: test".to_string() };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: ErrorResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.code, resp.code);
+        assert_eq!(deserialized.message, resp.message);
+    }
+}

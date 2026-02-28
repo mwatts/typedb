@@ -214,3 +214,295 @@ impl<const ARRAY_INLINE_SIZE: usize> Prefix for ByteArray<ARRAY_INLINE_SIZE> {
         self.starts_with(&other)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::hash_map::DefaultHasher;
+
+    use super::*;
+
+    #[test]
+    fn empty_has_zero_length() {
+        let arr = ByteArray::<16>::empty();
+        assert_eq!(arr.len(), 0);
+        assert_eq!(&*arr, &[] as &[u8]);
+    }
+
+    #[test]
+    fn zeros_creates_inline_when_small() {
+        let arr = ByteArray::<16>::zeros(8);
+        assert_eq!(arr.len(), 8);
+        assert!(matches!(arr, ByteArray::Inline { .. }));
+        assert!(arr.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn zeros_creates_boxed_when_large() {
+        let arr = ByteArray::<8>::zeros(100);
+        assert_eq!(arr.len(), 100);
+        assert!(matches!(arr, ByteArray::Boxed(_)));
+        assert!(arr.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn copy_small_is_inline() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        assert_eq!(arr.len(), 5);
+        assert!(matches!(arr, ByteArray::Inline { .. }));
+        assert_eq!(&*arr, b"hello");
+    }
+
+    #[test]
+    fn copy_large_is_boxed() {
+        let data = vec![42u8; 100];
+        let arr = ByteArray::<8>::copy(&data);
+        assert_eq!(arr.len(), 100);
+        assert!(matches!(arr, ByteArray::Boxed(_)));
+        assert_eq!(&*arr, &data[..]);
+    }
+
+    #[test]
+    fn copy_exact_inline_size_is_inline() {
+        let data = [1u8; 16];
+        let arr = ByteArray::<16>::copy(&data);
+        assert!(matches!(arr, ByteArray::Inline { .. }));
+        assert_eq!(arr.len(), 16);
+    }
+
+    #[test]
+    fn copy_inline_basic() {
+        let arr = ByteArray::<16>::copy_inline(b"test");
+        assert_eq!(&*arr, b"test");
+    }
+
+    #[test]
+    fn copy_concat_two_slices() {
+        let arr = ByteArray::<16>::copy_concat([b"hel", b"lo"]);
+        assert_eq!(&*arr, b"hello");
+    }
+
+    #[test]
+    fn copy_concat_empty_slices() {
+        let arr = ByteArray::<16>::copy_concat([b"", b"", b""]);
+        assert_eq!(arr.len(), 0);
+    }
+
+    #[test]
+    fn copy_concat_boxed_when_large() {
+        let a = vec![1u8; 50];
+        let b = vec![2u8; 50];
+        let arr = ByteArray::<8>::copy_concat([&a, &b]);
+        assert_eq!(arr.len(), 100);
+        assert!(matches!(arr, ByteArray::Boxed(_)));
+    }
+
+    #[test]
+    fn truncate_shortens_inline() {
+        let mut arr = ByteArray::<16>::copy(b"hello world");
+        arr.truncate(5);
+        assert_eq!(&*arr, b"hello");
+    }
+
+    #[test]
+    fn truncate_shortens_boxed() {
+        let data = vec![1u8; 100];
+        let mut arr = ByteArray::<8>::copy(&data);
+        arr.truncate(10);
+        assert_eq!(arr.len(), 10);
+    }
+
+    #[test]
+    fn truncate_to_zero() {
+        let mut arr = ByteArray::<16>::copy(b"hello");
+        arr.truncate(0);
+        assert_eq!(arr.len(), 0);
+    }
+
+    #[test]
+    fn truncate_range_middle() {
+        let mut arr = ByteArray::<16>::copy(b"hello world");
+        arr.truncate_range(6..11);
+        assert_eq!(&*arr, b"world");
+    }
+
+    #[test]
+    fn truncate_range_from_start() {
+        let mut arr = ByteArray::<16>::copy(b"hello");
+        arr.truncate_range(0..3);
+        assert_eq!(&*arr, b"hel");
+    }
+
+    #[test]
+    fn starts_with_matching_prefix() {
+        let arr = ByteArray::<16>::copy(b"hello world");
+        assert!(arr.starts_with(b"hello"));
+    }
+
+    #[test]
+    fn starts_with_non_matching() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        assert!(!arr.starts_with(b"world"));
+    }
+
+    #[test]
+    fn starts_with_empty_prefix() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        assert!(arr.starts_with(b""));
+    }
+
+    #[test]
+    fn starts_with_longer_prefix_returns_false() {
+        let arr = ByteArray::<16>::copy(b"hi");
+        assert!(!arr.starts_with(b"hello"));
+    }
+
+    #[test]
+    fn starts_with_exact_match() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        assert!(arr.starts_with(b"hello"));
+    }
+
+    #[test]
+    fn increment_no_carry() {
+        let mut arr = ByteArray::<4>::copy(&[0, 0, 0, 1]);
+        arr.increment().unwrap();
+        assert_eq!(&*arr, &[0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn increment_with_carry() {
+        let mut arr = ByteArray::<4>::copy(&[0, 0, 0, 255]);
+        arr.increment().unwrap();
+        assert_eq!(&*arr, &[0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn increment_overflow() {
+        let mut arr = ByteArray::<4>::copy(&[255, 255, 255, 255]);
+        assert!(arr.increment().is_err());
+    }
+
+    #[test]
+    fn deref_provides_slice_access() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        let slice: &[u8] = &arr;
+        assert_eq!(slice, b"hello");
+    }
+
+    #[test]
+    fn deref_mut_allows_modification() {
+        let mut arr = ByteArray::<16>::copy(b"hello");
+        arr[0] = b'H';
+        assert_eq!(&*arr, b"Hello");
+    }
+
+    #[test]
+    fn equality_between_inline_and_boxed() {
+        let inline = ByteArray::<16>::copy(b"hello");
+        let boxed = ByteArray::<4>::copy(b"hello");
+        // Different types so can't directly compare, but content is same
+        assert_eq!(&*inline, &*boxed);
+    }
+
+    #[test]
+    fn equality_same_content() {
+        let a = ByteArray::<16>::copy(b"test");
+        let b = ByteArray::<16>::copy(b"test");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn inequality_different_content() {
+        let a = ByteArray::<16>::copy(b"hello");
+        let b = ByteArray::<16>::copy(b"world");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn equality_with_raw_slice() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        assert!(arr == b"hello"[..]);
+    }
+
+    #[test]
+    fn ordering_lexicographic() {
+        let a = ByteArray::<16>::copy(&[0, 1]);
+        let b = ByteArray::<16>::copy(&[0, 2]);
+        assert!(a < b);
+    }
+
+    #[test]
+    fn ordering_prefix_shorter_is_less() {
+        let a = ByteArray::<16>::copy(&[1, 2]);
+        let b = ByteArray::<16>::copy(&[1, 2, 3]);
+        assert!(a < b);
+    }
+
+    #[test]
+    fn hash_same_for_equal_arrays() {
+        let a = ByteArray::<16>::copy(b"test");
+        let b = ByteArray::<16>::copy(b"test");
+        let hash_a = {
+            let mut hasher = DefaultHasher::new();
+            a.hash(&mut hasher);
+            hasher.finish()
+        };
+        let hash_b = {
+            let mut hasher = DefaultHasher::new();
+            b.hash(&mut hasher);
+            hasher.finish()
+        };
+        assert_eq!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn clone_produces_independent_copy() {
+        let original = ByteArray::<16>::copy(b"hello");
+        let mut cloned = original.clone();
+        cloned[0] = b'H';
+        assert_eq!(&*original, b"hello");
+        assert_eq!(&*cloned, b"Hello");
+    }
+
+    #[test]
+    fn from_slice_conversion() {
+        let arr: ByteArray<16> = ByteArray::from(&b"hello"[..]);
+        assert_eq!(&*arr, b"hello");
+    }
+
+    #[test]
+    fn as_ref_returns_slice() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        let slice: &[u8] = arr.as_ref();
+        assert_eq!(slice, b"hello");
+    }
+
+    #[test]
+    fn borrow_returns_slice() {
+        let arr = ByteArray::<16>::copy(b"hello");
+        let slice: &[u8] = arr.borrow();
+        assert_eq!(slice, b"hello");
+    }
+
+    #[test]
+    fn debug_format_shows_hex() {
+        let arr = ByteArray::<16>::copy(&[0xab, 0xcd]);
+        let debug = format!("{:?}", arr);
+        assert!(debug.contains("AB"));
+        assert!(debug.contains("CD"));
+    }
+
+    #[test]
+    fn prefix_trait_works() {
+        let full = ByteArray::<16>::copy(b"hello world");
+        let prefix = ByteArray::<16>::copy(b"hello");
+        assert!(Prefix::starts_with(&full, &prefix));
+    }
+
+    #[test]
+    fn prefix_trait_into_starts_with() {
+        let full = ByteArray::<16>::copy(b"hello world");
+        let prefix = ByteArray::<16>::copy(b"hello");
+        assert!(Prefix::into_starts_with(full, prefix));
+    }
+}

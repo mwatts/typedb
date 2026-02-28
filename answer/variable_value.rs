@@ -174,3 +174,152 @@ pub enum FunctionValue<'a> {
     ValueList(Vec<Value<'a>>),
     ValueListOptional(Option<Vec<Value<'a>>>),
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+
+    use super::*;
+
+    #[test]
+    fn none_variant_is_none() {
+        let val = VariableValue::None;
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn none_constant_is_none() {
+        assert!(VariableValue::NONE.is_none());
+    }
+
+    #[test]
+    fn none_variant_name() {
+        assert_eq!(VariableValue::None.variant_name(), "none");
+    }
+
+    #[test]
+    fn none_display() {
+        let display = format!("{}", VariableValue::None);
+        assert_eq!(display, "[None]");
+    }
+
+    #[test]
+    fn none_equality() {
+        assert_eq!(VariableValue::None, VariableValue::None);
+    }
+
+    #[test]
+    fn none_partial_ord_with_none() {
+        assert_eq!(VariableValue::None.partial_cmp(&VariableValue::None), Some(Ordering::Equal));
+    }
+
+    #[test]
+    fn none_to_owned() {
+        let owned = VariableValue::None.to_owned();
+        assert!(owned.is_none());
+    }
+
+    #[test]
+    fn none_into_owned() {
+        let owned = VariableValue::None.into_owned();
+        assert!(owned.is_none());
+    }
+
+    #[test]
+    fn none_as_reference() {
+        let reference = VariableValue::None.as_reference();
+        assert!(reference.is_none());
+    }
+
+    #[test]
+    fn none_get_type_returns_none() {
+        assert!(VariableValue::None.get_type().is_none());
+    }
+
+    #[test]
+    fn none_get_thing_returns_none() {
+        assert!(VariableValue::None.get_thing().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "VariableValue is not a Type")]
+    fn none_as_type_panics() {
+        let _ = VariableValue::None.as_type();
+    }
+
+    #[test]
+    #[should_panic(expected = "VariableValue is not a Thing")]
+    fn none_as_thing_panics() {
+        let _ = VariableValue::None.as_thing();
+    }
+
+    #[test]
+    #[should_panic(expected = "VariableValue is not a value")]
+    fn none_as_value_panics() {
+        let _ = VariableValue::None.as_value();
+    }
+
+    #[test]
+    fn value_variant_with_long() {
+        let val = VariableValue::Value(Value::Integer(42));
+        assert!(!val.is_none());
+        assert_eq!(val.variant_name(), "value");
+        assert_eq!(*val.as_value(), Value::Integer(42));
+    }
+
+    #[test]
+    fn value_variant_to_owned() {
+        let val = VariableValue::Value(Value::Integer(42));
+        let owned = val.to_owned();
+        assert_eq!(owned.variant_name(), "value");
+    }
+
+    #[test]
+    fn value_variant_into_owned() {
+        let val = VariableValue::Value(Value::Boolean(true));
+        let owned = val.into_owned();
+        assert_eq!(owned.variant_name(), "value");
+    }
+
+    #[test]
+    fn value_partial_ord_same_type() {
+        let a = VariableValue::Value(Value::Integer(1));
+        let b = VariableValue::Value(Value::Integer(2));
+        assert_eq!(a.partial_cmp(&b), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn none_less_than_value() {
+        let none = VariableValue::None;
+        let value = VariableValue::Value(Value::Integer(1));
+        assert_eq!(none.partial_cmp(&value), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn value_greater_than_none() {
+        let value = VariableValue::Value(Value::Integer(1));
+        let none = VariableValue::None;
+        assert_eq!(value.partial_cmp(&none), Some(Ordering::Greater));
+    }
+
+    #[test]
+    fn value_display() {
+        let val = VariableValue::Value(Value::Integer(42));
+        let display = format!("{}", val);
+        assert!(display.contains("42"));
+    }
+
+    #[test]
+    fn empty_thing_list() {
+        let val = VariableValue::ThingList(Arc::from(Vec::<Thing>::new().into_boxed_slice()));
+        assert_eq!(val.variant_name(), "thing list");
+        assert!(!val.is_none());
+    }
+
+    #[test]
+    fn empty_value_list() {
+        let val = VariableValue::ValueList(Arc::from(Vec::<Value<'static>>::new().into_boxed_slice()));
+        assert_eq!(val.variant_name(), "value list");
+        assert!(!val.is_none());
+    }
+}
