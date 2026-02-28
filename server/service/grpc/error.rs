@@ -117,3 +117,139 @@ typedb_error! {
         UnexpectedMissingField(1, "Invalid request: missing field '{field}'.", field: String),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use error::TypeDBError;
+    use tonic::Code;
+
+    use super::*;
+
+    // --- ProtocolError into_status ---
+
+    #[test]
+    fn missing_field_produces_invalid_argument() {
+        let err = ProtocolError::MissingField { name: "database_name", description: "Required field" };
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert_eq!(status.message(), "Bad request");
+    }
+
+    #[test]
+    fn transaction_already_open_produces_already_exists() {
+        let err = ProtocolError::TransactionAlreadyOpen {};
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::AlreadyExists);
+        assert!(status.message().contains("Transaction already open"));
+    }
+
+    #[test]
+    fn transaction_closed_produces_invalid_argument() {
+        let err = ProtocolError::TransactionClosed {};
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(status.message().contains("Transaction already closed"));
+    }
+
+    #[test]
+    fn unrecognised_transaction_type_produces_invalid_argument() {
+        let err = ProtocolError::UnrecognisedTransactionType { enum_variant: 99 };
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert_eq!(status.message(), "Bad request");
+    }
+
+    #[test]
+    fn incompatible_protocol_newer_server() {
+        let err = ProtocolError::IncompatibleProtocolVersion {
+            server_protocol_version: 5,
+            driver_protocol_version: 3,
+            driver_lang: "rust".to_string(),
+            driver_version: "1.0".to_string(),
+        };
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::FailedPrecondition);
+        let msg = status.message().to_string();
+        assert!(msg.contains("a newer"));
+        assert!(msg.contains("rust"));
+        assert!(msg.contains("1.0"));
+    }
+
+    #[test]
+    fn incompatible_protocol_older_server() {
+        let err = ProtocolError::IncompatibleProtocolVersion {
+            server_protocol_version: 2,
+            driver_protocol_version: 5,
+            driver_lang: "python".to_string(),
+            driver_version: "2.0".to_string(),
+        };
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::FailedPrecondition);
+        let msg = status.message().to_string();
+        assert!(msg.contains("an older"));
+        assert!(msg.contains("python"));
+    }
+
+    #[test]
+    fn error_completing_write_produces_internal() {
+        let err = ProtocolError::ErrorCompletingWrite {};
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::Internal);
+        assert!(status.message().contains("Error completing"));
+    }
+
+    #[test]
+    fn failed_query_response_produces_internal() {
+        let err = ProtocolError::FailedQueryResponse {};
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::Internal);
+        assert!(status.message().contains("Failed to send response"));
+    }
+
+    // --- typedb_protocol::Error into_status ---
+
+    #[test]
+    fn protocol_error_message_into_status() {
+        let err = typedb_protocol::Error {
+            error_code: "TST01".to_string(),
+            domain: "Test".to_string(),
+            stack_trace: vec!["error line 1".to_string(), "error line 2".to_string()],
+        };
+        let status = err.into_status();
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert_eq!(status.message(), "Request generated error");
+    }
+
+    // --- IntoProtocolErrorMessage ---
+
+    #[test]
+    fn grpc_service_error_into_error_message() {
+        let err = GrpcServiceError::UnexpectedMissingField { field: "name".to_string() };
+        let msg = err.into_error_message();
+        assert_eq!(msg.error_code, "GSR1");
+        assert_eq!(msg.domain, "GRPC Service");
+        assert!(!msg.stack_trace.is_empty());
+    }
+
+    // --- GrpcServiceError ---
+
+    #[test]
+    fn grpc_service_error_code() {
+        let err = GrpcServiceError::UnexpectedMissingField { field: "db".to_string() };
+        assert_eq!(err.code().to_string(), "GSR1");
+    }
+
+    #[test]
+    fn grpc_service_error_component() {
+        let err = GrpcServiceError::UnexpectedMissingField { field: "db".to_string() };
+        assert_eq!(err.component(), "GRPC Service");
+    }
+
+    #[test]
+    fn grpc_service_error_format_description() {
+        let err = GrpcServiceError::UnexpectedMissingField { field: "db".to_string() };
+        let desc = error::TypeDBError::format_description(&err);
+        assert!(desc.contains("missing field"));
+        assert!(desc.contains("db"));
+    }
+}

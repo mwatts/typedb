@@ -341,3 +341,261 @@ impl<T: Hkt> LendingIterator for Once<T> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- AsLendingIterator ---
+
+    #[test]
+    fn as_lending_iterator_produces_all_items() {
+        let mut iter = AsLendingIterator::new(vec![1, 2, 3]);
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next(), Some(3));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn as_lending_iterator_empty() {
+        let mut iter = AsLendingIterator::new(Vec::<i32>::new());
+        assert_eq!(iter.next(), None);
+    }
+
+    // --- count ---
+
+    #[test]
+    fn count_elements() {
+        let iter = AsLendingIterator::new(vec![1, 2, 3]);
+        assert_eq!(iter.count(), 3);
+    }
+
+    #[test]
+    fn count_empty() {
+        let iter = AsLendingIterator::new(Vec::<i32>::new());
+        assert_eq!(iter.count(), 0);
+    }
+
+    #[test]
+    fn count_as_ref_elements() {
+        let mut iter = AsLendingIterator::new(vec![1, 2, 3]);
+        assert_eq!(iter.count_as_ref(), 3);
+    }
+
+    // --- collect ---
+
+    #[test]
+    fn collect_to_vec() {
+        let iter = AsLendingIterator::new(vec![1, 2, 3]);
+        let result: Vec<i32> = iter.collect();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn collect_empty() {
+        let iter = AsLendingIterator::new(Vec::<i32>::new());
+        let result: Vec<i32> = iter.collect();
+        assert!(result.is_empty());
+    }
+
+    // --- into_iter ---
+
+    #[test]
+    fn into_iter_conversion() {
+        let iter = AsLendingIterator::new(vec![10, 20, 30]);
+        let std_iter = iter.into_iter();
+        let result: Vec<i32> = std_iter.collect();
+        assert_eq!(result, vec![10, 20, 30]);
+    }
+
+    // --- chain ---
+
+    #[test]
+    fn chain_two_iterators() {
+        let a = AsLendingIterator::new(vec![1, 2]);
+        let b = AsLendingIterator::new(vec![3, 4]);
+        let result: Vec<i32> = a.chain(b).collect();
+        assert_eq!(result, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn chain_first_empty() {
+        let a = AsLendingIterator::new(Vec::<i32>::new());
+        let b = AsLendingIterator::new(vec![1, 2]);
+        let result: Vec<i32> = a.chain(b).collect();
+        assert_eq!(result, vec![1, 2]);
+    }
+
+    #[test]
+    fn chain_second_empty() {
+        let a = AsLendingIterator::new(vec![1, 2]);
+        let b = AsLendingIterator::new(Vec::<i32>::new());
+        let result: Vec<i32> = a.chain(b).collect();
+        assert_eq!(result, vec![1, 2]);
+    }
+
+    #[test]
+    fn chain_both_empty() {
+        let a = AsLendingIterator::new(Vec::<i32>::new());
+        let b = AsLendingIterator::new(Vec::<i32>::new());
+        let result: Vec<i32> = a.chain(b).collect();
+        assert!(result.is_empty());
+    }
+
+    // --- zip ---
+
+    #[test]
+    fn zip_same_length() {
+        let a = AsLendingIterator::new(vec![1, 2, 3]);
+        let b = AsLendingIterator::new(vec![10, 20, 30]);
+        let result: Vec<(i32, i32)> = a.zip(b).collect();
+        assert_eq!(result, vec![(1, 10), (2, 20), (3, 30)]);
+    }
+
+    #[test]
+    fn zip_first_shorter() {
+        let a = AsLendingIterator::new(vec![1, 2]);
+        let b = AsLendingIterator::new(vec![10, 20, 30]);
+        let result: Vec<(i32, i32)> = a.zip(b).collect();
+        assert_eq!(result, vec![(1, 10), (2, 20)]);
+    }
+
+    #[test]
+    fn zip_second_shorter() {
+        let a = AsLendingIterator::new(vec![1, 2, 3]);
+        let b = AsLendingIterator::new(vec![10]);
+        let result: Vec<(i32, i32)> = a.zip(b).collect();
+        assert_eq!(result, vec![(1, 10)]);
+    }
+
+    #[test]
+    fn zip_empty() {
+        let a = AsLendingIterator::new(Vec::<i32>::new());
+        let b = AsLendingIterator::new(vec![1, 2]);
+        let result: Vec<(i32, i32)> = a.zip(b).collect();
+        assert!(result.is_empty());
+    }
+
+    // --- map_static ---
+
+    #[test]
+    fn map_static_transforms_items() {
+        let iter = AsLendingIterator::new(vec![1, 2, 3]);
+        let result: Vec<i32> = iter.map_static(|x: i32| x * 2).collect();
+        assert_eq!(result, vec![2, 4, 6]);
+    }
+
+    #[test]
+    fn map_static_empty() {
+        let iter = AsLendingIterator::new(Vec::<i32>::new());
+        let result: Vec<i32> = iter.map_static(|x: i32| x * 2).collect();
+        assert!(result.is_empty());
+    }
+
+    // --- take_while ---
+
+    #[test]
+    fn take_while_stops_at_predicate() {
+        let iter = AsLendingIterator::new(vec![1, 2, 3, 4, 5]);
+        let result: Vec<i32> = iter.take_while(|x: &i32| *x < 4).collect();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn take_while_all_match() {
+        let iter = AsLendingIterator::new(vec![1, 2, 3]);
+        let result: Vec<i32> = iter.take_while(|x: &i32| *x < 10).collect();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn take_while_none_match() {
+        let iter = AsLendingIterator::new(vec![10, 20, 30]);
+        let result: Vec<i32> = iter.take_while(|x: &i32| *x < 5).collect();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn take_while_empty() {
+        let iter = AsLendingIterator::new(Vec::<i32>::new());
+        let result: Vec<i32> = iter.take_while(|_: &i32| true).collect();
+        assert!(result.is_empty());
+    }
+
+    // --- try_collect ---
+
+    #[test]
+    fn try_collect_all_ok() {
+        let iter = AsLendingIterator::new(vec![Ok(1), Ok(2), Ok(3)]);
+        let result: Result<Vec<i32>, &str> = iter.try_collect();
+        assert_eq!(result, Ok(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn try_collect_with_error() {
+        let iter = AsLendingIterator::new(vec![Ok(1), Err("fail"), Ok(3)]);
+        let result: Result<Vec<i32>, &str> = iter.try_collect();
+        assert_eq!(result, Err("fail"));
+    }
+
+    // --- Once ---
+
+    #[test]
+    fn once_produces_single_item() {
+        let mut iter = once::<AdHocHkt<i32>>(42);
+        assert_eq!(iter.next(), Some(42));
+        assert_eq!(iter.next(), None);
+    }
+
+    // --- Peekable ---
+
+    #[test]
+    fn peekable_peek_returns_item() {
+        let inner = AsLendingIterator::new(vec![1, 2, 3]);
+        let mut peekable = Peekable::new(inner);
+        assert_eq!(peekable.peek(), Some(&1));
+        assert_eq!(peekable.peek(), Some(&1)); // peek again returns same item
+    }
+
+    #[test]
+    fn peekable_next_after_peek() {
+        let inner = AsLendingIterator::new(vec![1, 2, 3]);
+        let mut peekable = Peekable::new(inner);
+        assert_eq!(peekable.peek(), Some(&1));
+        assert_eq!(peekable.next(), Some(1));
+        assert_eq!(peekable.next(), Some(2));
+        assert_eq!(peekable.next(), Some(3));
+        assert_eq!(peekable.next(), None);
+    }
+
+    #[test]
+    fn peekable_next_without_peek() {
+        let inner = AsLendingIterator::new(vec![1, 2]);
+        let mut peekable = Peekable::new(inner);
+        assert_eq!(peekable.next(), Some(1));
+        assert_eq!(peekable.next(), Some(2));
+        assert_eq!(peekable.next(), None);
+    }
+
+    #[test]
+    fn peekable_empty() {
+        let inner = AsLendingIterator::new(Vec::<i32>::new());
+        let mut peekable = Peekable::new(inner);
+        assert_eq!(peekable.peek(), None);
+        assert_eq!(peekable.next(), None);
+    }
+
+    // --- inspect ---
+
+    #[test]
+    fn inspect_sees_all_items() {
+        let mut seen = Vec::new();
+        let seen_ptr = &mut seen as *mut Vec<i32>;
+        let iter = AsLendingIterator::new(vec![1, 2, 3]);
+        let inspected = iter.inspect(move |x: &i32| unsafe { (*seen_ptr).push(*x) });
+        let result: Vec<i32> = inspected.collect();
+        assert_eq!(result, vec![1, 2, 3]);
+        assert_eq!(seen, vec![1, 2, 3]);
+    }
+}
