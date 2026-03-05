@@ -11,7 +11,9 @@ use std::{fs::File, os::raw::c_int, path::Path, sync::Arc};
 use bytes::byte_array::ByteArray;
 use criterion::{Criterion, criterion_group, criterion_main, profiler::Profiler};
 use durability::wal::WAL;
+use kv::keyspaces::{KeyspaceId, KeyspaceSet};
 use pprof::ProfilerGuard;
+use primitive::key_range::KeyRange;
 use resource::{
     constants::snapshot::{BUFFER_KEY_INLINE, BUFFER_VALUE_INLINE},
     profile::{CommitProfile, StorageCounters},
@@ -19,9 +21,7 @@ use resource::{
 use storage::{
     MVCCStorage,
     durability_client::WALClient,
-    key_range::KeyRange,
     key_value::{StorageKey, StorageKeyArray, StorageKeyReference},
-    keyspace::{KeyspaceId, KeyspaceSet},
     snapshot::{CommittableSnapshot, ReadableSnapshot, WritableSnapshot},
 };
 use test_utils::{create_tmp_storage_dir, init_logging};

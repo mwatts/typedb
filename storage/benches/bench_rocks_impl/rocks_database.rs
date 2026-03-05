@@ -94,12 +94,12 @@ mod typedb_database {
 
     use bytes::byte_array::ByteArray;
     use durability::wal::WAL;
+    use kv::keyspaces::{KeyspaceId, KeyspaceSet};
     use resource::profile::CommitProfile;
     use storage::{
         MVCCStorage, StorageOpenError,
         durability_client::WALClient,
         key_value::StorageKeyArray,
-        keyspace::{KeyspaceId, KeyspaceSet},
         snapshot::{CommittableSnapshot, SnapshotError, WritableSnapshot, WriteSnapshot},
     };
     use test_utils::{TempDir, create_tmp_storage_dir};

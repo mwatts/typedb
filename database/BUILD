@@ -42,7 +42,6 @@ rust_library(
 
         "@typeql//rust:typeql",
         "@crates//:itertools",
-        "@crates//:rocksdb",
         "@crates//:tracing",
         "@crates//:tokio",
     ],

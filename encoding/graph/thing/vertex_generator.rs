@@ -9,11 +9,10 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use bytes::{Bytes, byte_array::ByteArray};
+use bytes::{byte_array::ByteArray, Bytes};
+use primitive::key_range::KeyRange;
 use resource::profile::StorageCounters;
 use storage::{
-    MVCCStorage,
-    key_range::KeyRange,
     key_value::{StorageKey, StorageKeyReference},
     snapshot::{ReadableSnapshot, WritableSnapshot, iterator::SnapshotIteratorError},
 };

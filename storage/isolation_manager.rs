@@ -665,10 +665,10 @@ mod tests {
         {$($variant:ident => $id:literal : $name: literal),* $(,)?} => {
             #[derive(Clone, Copy)]
             enum TestKeyspaceSet { $($variant),* }
-            impl KeyspaceSet for TestKeyspaceSet {
+            impl kv::keyspaces::KeyspaceSet for TestKeyspaceSet {
                 fn iter() -> impl Iterator<Item = Self> { [$(Self::$variant),*].into_iter() }
-                fn id(&self) -> KeyspaceId {
-                    match *self { $(Self::$variant => KeyspaceId($id)),* }
+                fn id(&self) -> kv::keyspaces::KeyspaceId {
+                    match *self { $(Self::$variant => kv::keyspaces::KeyspaceId($id)),* }
                 }
                 fn name(&self) -> &'static str {
                     match *self { $(Self::$variant => $name),* }

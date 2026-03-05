@@ -883,15 +883,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "clipboard-win"
-version = "5.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
-dependencies = [
- "error-code",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -908,7 +899,7 @@ dependencies = [
  "encoding",
  "error",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "resource",
  "serde",
  "storage",
@@ -933,7 +924,7 @@ dependencies = [
  "encoding",
  "error",
  "iterator",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "lending_iterator",
  "logger",
  "paste",
@@ -957,8 +948,6 @@ name = "concurrency"
 version = "0.0.0"
 dependencies = [
  "tokio",
- "tokio-test",
- "tokio-util",
 ]
 
 [[package]]
@@ -1245,15 +1234,13 @@ dependencies = [
  "encoding",
  "error",
  "executor",
- "fail_point",
  "function",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "logger",
  "options",
  "query",
  "resource",
- "rocksdb",
  "storage",
  "test_utils",
  "tokio",
@@ -1379,8 +1366,7 @@ dependencies = [
  "criterion",
  "durability_test_common",
  "error",
- "fail_point",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "logger",
  "lz4",
  "rand 0.8.6",
@@ -1427,7 +1413,8 @@ dependencies = [
  "criterion",
  "durability",
  "error",
- "itertools 0.14.0",
+ "itertools 0.10.5",
+ "kv",
  "lending_iterator",
  "logger",
  "primitive",
@@ -1454,27 +1441,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "endian-type"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
-
-[[package]]
-name = "erased-serde"
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2add8a07dd6a8d93ff627029c51de145e12686fbc36ecb298ac22e74cf02dec"
-dependencies = [
- "serde",
- "serde_core",
- "typeid",
-]
 
 [[package]]
 name = "errno"
@@ -1493,12 +1463,6 @@ dependencies = [
  "resource",
  "typeql",
 ]
-
-[[package]]
-name = "error-code"
-version = "3.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "event-listener"
@@ -1553,7 +1517,7 @@ dependencies = [
  "function",
  "ir",
  "iterator",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "lending_iterator",
  "logger",
  "paste",
@@ -1573,15 +1537,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fail_point"
-version = "0.0.0"
-dependencies = [
- "itertools 0.14.0",
- "rand 0.8.6",
- "tracing",
-]
-
-[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1595,17 +1550,6 @@ name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
-
-[[package]]
-name = "fd-lock"
-version = "4.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
-dependencies = [
- "cfg-if",
- "rustix 1.1.4",
- "windows-sys 0.59.0",
-]
 
 [[package]]
 name = "find-msvc-tools"
@@ -1680,7 +1624,7 @@ dependencies = [
  "encoding",
  "error",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "logger",
  "primitive",
  "rand 0.8.6",
@@ -2104,15 +2048,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "home"
-version = "0.5.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
-dependencies = [
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "hostname"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2190,7 +2125,7 @@ dependencies = [
  "futures",
  "hyper 0.14.32",
  "hyper-rustls 0.25.0",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "macro_rules_attribute",
  "options",
  "params",
@@ -2301,7 +2236,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
- "webpki-roots 1.0.7",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
@@ -2589,7 +2524,7 @@ dependencies = [
  "durability",
  "encoding",
  "error",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "primitive",
  "regex",
  "resource",
@@ -2700,6 +2635,24 @@ dependencies = [
  "serde",
  "serde_json",
  "simple_asn1",
+]
+
+[[package]]
+name = "kv"
+version = "0.0.0"
+dependencies = [
+ "bytes 0.0.0",
+ "error",
+ "itertools 0.10.5",
+ "lending_iterator",
+ "logger",
+ "primitive",
+ "resource",
+ "rocksdb",
+ "serde",
+ "structural_equality",
+ "tracing",
+ "typeql",
 ]
 
 [[package]]
@@ -2980,15 +2933,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
-name = "nibble_vec"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
-dependencies = [
- "smallvec",
-]
-
-[[package]]
 name = "nix"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2996,18 +2940,6 @@ checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
-dependencies = [
- "bitflags 2.11.1",
- "cfg-if",
- "cfg_aliases",
  "libc",
 ]
 
@@ -3343,7 +3275,7 @@ dependencies = [
  "cucumber",
  "encoding",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "regex",
  "storage",
  "test_utils",
@@ -3449,9 +3381,9 @@ dependencies = [
 
 [[package]]
 name = "pest_derive"
-version = "2.8.6"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11f486f1ea21e6c10ed15d5a7c77165d0ee443402f0780849d1768e7d9d6fe77"
+checksum = "d725d9cfd79e87dccc9341a2ef39d1b6f6353d68c4b33c177febbe1a402c97c5"
 dependencies = [
  "pest",
  "pest_generator",
@@ -3459,9 +3391,9 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.8.6"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8040c4647b13b210a963c1ed407c1ff4fdfa01c31d6d2a098218702e6664f94f"
+checksum = "db7d01726be8ab66ab32f9df467ae8b1148906685bbe75c82d1e65d7f5b3f841"
 dependencies = [
  "pest",
  "pest_meta",
@@ -3472,10 +3404,11 @@ dependencies = [
 
 [[package]]
 name = "pest_meta"
-version = "2.8.6"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89815c69d36021a140146f26659a81d6c2afa33d216d736dd4be5381a7362220"
+checksum = "7f9f832470494906d1fca5329f8ab5791cc60beb230c74815dff541cbd2b5ca0"
 dependencies = [
+ "once_cell",
  "pest",
  "sha2 0.10.9",
 ]
@@ -3800,7 +3733,7 @@ dependencies = [
  "executor",
  "function",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "lending_iterator",
  "moka",
  "pprof",
@@ -3837,10 +3770,10 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash",
- "rustls 0.23.39",
- "socket2 0.6.3",
- "thiserror 2.0.18",
+ "rustc-hash 2.1.1",
+ "rustls 0.23.23",
+ "socket2 0.5.8",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "web-time",
@@ -3876,9 +3809,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.8",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3901,16 +3834,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "radix_trie"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
-dependencies = [
- "endian-type",
- "nibble_vec",
-]
 
 [[package]]
 name = "rand"
@@ -4171,7 +4094,7 @@ dependencies = [
 name = "resource"
 version = "0.0.0"
 dependencies = [
- "itertools 0.14.0",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -4368,27 +4291,6 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
-
-[[package]]
-name = "rustyline"
-version = "15.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ee1e066dc922e513bda599c6ccb5f3bb2b0ea5870a579448f2622993f0a9a2f"
-dependencies = [
- "bitflags 2.11.1",
- "cfg-if",
- "clipboard-win",
- "fd-lock",
- "libc",
- "log",
- "memchr",
- "nix 0.29.0",
- "radix_trie",
- "unicode-segmentation",
- "unicode-width",
- "utf8parse",
- "windows-sys 0.59.0",
-]
 
 [[package]]
 name = "ryu"
@@ -4738,9 +4640,7 @@ dependencies = [
  "concurrency",
  "database",
  "diagnostics",
- "durability",
  "encoding",
- "erased-serde",
  "error",
  "executor",
  "function",
@@ -4748,7 +4648,7 @@ dependencies = [
  "http 1.4.0",
  "hyper 0.14.32",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "jsonwebtoken",
  "lending_iterator",
  "logger",
@@ -4765,14 +4665,11 @@ dependencies = [
  "serde_json",
  "serde_with",
  "serde_yaml2",
- "server_admin_proto",
  "storage",
  "system",
- "test_utils",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream",
- "tokio-util",
  "tonic",
  "tonic-types",
  "tower 0.4.13",
@@ -4784,15 +4681,6 @@ dependencies = [
  "uuid",
  "xxhash-rust",
  "yaml-rust2 0.10.4",
-]
-
-[[package]]
-name = "server_admin_proto"
-version = "0.0.0"
-dependencies = [
- "prost",
- "tonic",
- "tonic-build",
 ]
 
 [[package]]
@@ -4992,7 +4880,7 @@ dependencies = [
  "function",
  "futures",
  "ir",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "lending_iterator",
  "logger",
  "macro_rules_attribute",
@@ -5020,8 +4908,8 @@ dependencies = [
  "database",
  "durability",
  "error",
- "fail_point",
- "itertools 0.14.0",
+ "itertools 0.10.5",
+ "kv",
  "lending_iterator",
  "logger",
  "pprof",
@@ -5052,7 +4940,7 @@ dependencies = [
  "bincode",
  "durability",
  "durability_test_common",
- "itertools 0.14.0",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -5279,6 +5167,7 @@ version = "0.0.0"
 dependencies = [
  "durability",
  "encoding",
+ "kv",
  "logger",
  "storage",
  "test_utils",
@@ -5291,7 +5180,9 @@ version = "0.0.0"
 dependencies = [
  "bytes 0.0.0",
  "durability",
+ "kv",
  "logger",
+ "primitive",
  "resource",
  "storage",
 ]
@@ -5409,9 +5300,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.11.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
+checksum = "09b3661f17e86524eccd4371ab0429194e0d7c008abb45f7a7495b1719463c71"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -5482,17 +5373,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-test"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6d24790a10a7af737693a3e8f1d03faef7e6ca0cc99aae5066f533766de545"
-dependencies = [
- "futures-core",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "tokio-tungstenite"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5513,7 +5393,6 @@ dependencies = [
  "bytes 1.11.1",
  "futures-core",
  "futures-sink",
- "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -5753,37 +5632,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "typedb-admin"
-version = "0.0.0"
-dependencies = [
- "error",
- "home",
- "resource",
- "rustyline",
- "server_admin_proto",
- "tokio",
- "tonic",
- "typeql",
-]
-
-[[package]]
 name = "typedb-protocol"
 version = "0.0.0"
-source = "git+https://github.com/typedb/typedb-protocol?rev=25ab3fb02715062bd036f8b83908de92b106a202#25ab3fb02715062bd036f8b83908de92b106a202"
+source = "git+https://github.com/typedb/typedb-protocol?rev=da3e316cb0022cb284083996f0659ad22db13aca#da3e316cb0022cb284083996f0659ad22db13aca"
 dependencies = [
  "prost",
  "tonic",
  "tonic-build",
-]
-
-[[package]]
-name = "typedb_admin_bin"
-version = "0.0.0"
-dependencies = [
- "clap",
- "resource",
- "tokio",
- "typedb-admin",
 ]
 
 [[package]]
@@ -5794,7 +5649,6 @@ dependencies = [
  "clap",
  "database",
  "executor",
- "fail_point",
  "function",
  "http_steps",
  "lending_iterator",
@@ -5810,16 +5664,9 @@ dependencies = [
  "storage",
  "test_utils",
  "tokio",
- "tracing",
  "typeql",
  "xoshiro",
 ]
-
-[[package]]
-name = "typeid"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "typenum"
@@ -5830,7 +5677,7 @@ checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 [[package]]
 name = "typeql"
 version = "0.0.0"
-source = "git+https://github.com/typedb/typeql?rev=a1fae91ebd68ed2d7b2eb5035c1287c3bc66789b#a1fae91ebd68ed2d7b2eb5035c1287c3bc66789b"
+source = "git+https://github.com/typedb/typeql?rev=ff46a9b50b021cb8c144998ef2c2e0ee84794363#ff46a9b50b021cb8c144998ef2c2e0ee84794363"
 dependencies = [
  "chrono",
  "itertools 0.14.0",
@@ -6168,14 +6015,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.7",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.7"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
 dependencies = [
  "rustls-pki-types",
 ]

@@ -15,6 +15,11 @@ features = {}
 
 [dependencies]
 
+	[dependencies.primitive]
+		path = "../../common/primitive"
+		features = []
+		default-features = false
+
 	[dependencies.resource]
 		workspace = true
 
@@ -26,6 +31,11 @@ features = {}
 
 	[dependencies.durability]
 		workspace = true
+
+	[dependencies.kv]
+		path = "../../kv"
+		features = []
+		default-features = false
 
 	[dependencies.storage]
 		workspace = true
