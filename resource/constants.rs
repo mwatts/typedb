@@ -152,6 +152,10 @@ pub mod encoding {
     pub type StructFieldIDUInt = u16;
 }
 
+pub mod kv {
+    pub const ITERATOR_CONTINUE_CONDITION_INLINE: usize = 48;
+}
+
 pub mod diagnostics {
     use std::time::Duration;
 

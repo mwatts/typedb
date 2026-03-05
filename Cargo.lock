@@ -1240,7 +1240,6 @@ dependencies = [
  "encoding",
  "error",
  "executor",
- "fail_point",
  "function",
  "ir",
  "itertools 0.10.5",
@@ -1248,7 +1247,6 @@ dependencies = [
  "options",
  "query",
  "resource",
- "rocksdb",
  "storage",
  "test_utils",
  "tokio",
@@ -1364,7 +1362,6 @@ dependencies = [
  "criterion",
  "durability_test_common",
  "error",
- "fail_point",
  "itertools 0.10.5",
  "logger",
  "lz4",
@@ -1413,6 +1410,7 @@ dependencies = [
  "durability",
  "error",
  "itertools 0.10.5",
+ "kv",
  "lending_iterator",
  "logger",
  "primitive",
@@ -1532,15 +1530,6 @@ dependencies = [
  "tracing",
  "typeql",
  "unicase",
-]
-
-[[package]]
-name = "fail_point"
-version = "0.0.0"
-dependencies = [
- "itertools 0.10.5",
- "rand 0.8.5",
- "tracing",
 ]
 
 [[package]]
@@ -2232,7 +2221,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.2",
  "tower-service",
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
@@ -2654,6 +2643,24 @@ dependencies = [
  "serde",
  "serde_json",
  "simple_asn1",
+]
+
+[[package]]
+name = "kv"
+version = "0.0.0"
+dependencies = [
+ "bytes 0.0.0",
+ "error",
+ "itertools 0.10.5",
+ "lending_iterator",
+ "logger",
+ "primitive",
+ "resource",
+ "rocksdb",
+ "serde",
+ "structural_equality",
+ "tracing",
+ "typeql",
 ]
 
 [[package]]
@@ -3221,9 +3228,9 @@ dependencies = [
 
 [[package]]
 name = "pest_derive"
-version = "2.8.3"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "187da9a3030dbafabbbfb20cb323b976dc7b7ce91fcd84f2f74d6e31d378e2de"
+checksum = "d725d9cfd79e87dccc9341a2ef39d1b6f6353d68c4b33c177febbe1a402c97c5"
 dependencies = [
  "pest",
  "pest_generator",
@@ -3231,9 +3238,9 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.8.3"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49b401d98f5757ebe97a26085998d6c0eecec4995cad6ab7fc30ffdf4b052843"
+checksum = "db7d01726be8ab66ab32f9df467ae8b1148906685bbe75c82d1e65d7f5b3f841"
 dependencies = [
  "pest",
  "pest_meta",
@@ -3244,10 +3251,11 @@ dependencies = [
 
 [[package]]
 name = "pest_meta"
-version = "2.8.3"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f27a2cfee9f9039c4d86faa5af122a0ac3851441a34865b8a043b46be0065a"
+checksum = "7f9f832470494906d1fca5329f8ab5791cc60beb230c74815dff541cbd2b5ca0"
 dependencies = [
+ "once_cell",
  "pest",
  "sha2 0.10.8",
 ]
@@ -3603,7 +3611,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.23",
- "socket2 0.6.0",
+ "socket2 0.5.8",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -3640,9 +3648,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.8",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4703,8 +4711,8 @@ dependencies = [
  "database",
  "durability",
  "error",
- "fail_point",
  "itertools 0.10.5",
+ "kv",
  "lending_iterator",
  "logger",
  "pprof",
@@ -4957,6 +4965,7 @@ version = "0.0.0"
 dependencies = [
  "durability",
  "encoding",
+ "kv",
  "logger",
  "storage",
  "test_utils",
@@ -4969,7 +4978,9 @@ version = "0.0.0"
 dependencies = [
  "bytes 0.0.0",
  "durability",
+ "kv",
  "logger",
+ "primitive",
  "resource",
  "storage",
 ]
@@ -5088,9 +5099,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.10.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+checksum = "09b3661f17e86524eccd4371ab0429194e0d7c008abb45f7a7495b1719463c71"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -5436,7 +5447,6 @@ dependencies = [
  "clap",
  "database",
  "executor",
- "fail_point",
  "function",
  "http_steps",
  "lending_iterator",
@@ -5450,7 +5460,6 @@ dependencies = [
  "storage",
  "test_utils",
  "tokio",
- "tracing",
  "typeql",
 ]
 
@@ -5463,7 +5472,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "typeql"
 version = "0.0.0"
-source = "git+https://github.com/typedb/typeql?tag=3.8.2#84a86eea62e4a9c4a454a4625401592ab0695db3"
+source = "git+https://github.com/typedb/typeql?rev=ff46a9b50b021cb8c144998ef2c2e0ee84794363#ff46a9b50b021cb8c144998ef2c2e0ee84794363"
 dependencies = [
  "chrono",
  "itertools 0.10.5",
@@ -5773,14 +5782,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.6"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
 dependencies = [
  "rustls-pki-types",
 ]

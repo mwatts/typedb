@@ -9,15 +9,17 @@ use std::{collections::BTreeMap, error::Error, sync::Arc};
 use durability::RawRecord;
 use error::typedb_error;
 use fail_point::{fail_point, RECOVERY_PARTIAL_WRITE};
+use kv::{
+    keyspaces::{Keyspaces, KeyspacesError},
+    write_batches::WriteBatches,
+};
 use tracing::{event, trace, Level};
 
 use crate::{
     durability_client::{DurabilityClient, DurabilityClientError, DurabilityRecord},
     isolation_manager::{CommitRecord, IsolationManager, StatusRecord, ValidatedCommit},
-    keyspace::{KeyspaceError, Keyspaces},
     sequence_number::SequenceNumber,
-    write_batches::WriteBatches,
-    MVCCStorage,
+    FromOperationsBuffer, MVCCStorage,
 };
 
 /// Load commit data from the start onwards. Ignores any statuses that are not paired with commit data.
@@ -147,7 +149,7 @@ pub(crate) fn apply_recovered(
             RecoveryCommitStatus::Validated(commit_record) => {
                 let write_batches = WriteBatches::from_operations(commit_sequence_number, commit_record.operations());
                 isolation_manager.load_validated(commit_sequence_number, commit_record);
-                keyspaces.write(write_batches).map_err(|error| KeyspaceWrite { source: error })?;
+                keyspaces.write(write_batches).map_err(|error| KeyspaceWrite { typedb_source: error })?;
                 fail_point!(RECOVERY_PARTIAL_WRITE);
                 isolation_manager
                     .applied(commit_sequence_number)
@@ -164,7 +166,7 @@ pub(crate) fn apply_recovered(
                     ValidatedCommit::Write(write_batches) => {
                         MVCCStorage::persist_commit_status(true, commit_sequence_number, durability_client)
                             .map_err(|error| DurabilityClientWrite { typedb_source: error })?;
-                        keyspaces.write(write_batches).map_err(|error| KeyspaceWrite { source: error })?;
+                        keyspaces.write(write_batches).map_err(|error| KeyspaceWrite { typedb_source: error })?;
                         fail_point!(RECOVERY_PARTIAL_WRITE);
                         isolation_manager.applied(commit_sequence_number).map_err(|error| Internal {
                             name: Arc::new(database_name.to_owned()),
@@ -199,7 +201,7 @@ typedb_error! {
             "Missing initial WAL records - expected first record number '{expected_sequence_number}', but found '{first_record_sequence_number}'.",
             expected_sequence_number: SequenceNumber, first_record_sequence_number: SequenceNumber
         ),
-        KeyspaceWrite(5, "Error writing recovered commits to keyspace.", source: KeyspaceError),
+        KeyspaceWrite(5, "Error writing recovered commits to keyspace.", typedb_source: KeyspacesError),
         Internal(6, "Storage recovery for database '{name}' failed with internal error.", name: Arc<String>, source: Arc<dyn Error + Send + Sync + 'static>),
     }
 }
