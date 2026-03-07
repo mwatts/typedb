@@ -29,7 +29,7 @@ impl InMemoryRangeIterator {
         data: &Arc<RwLock<BTreeMap<Box<[u8]>, Box<[u8]>>>>,
         range: &KeyRange<Bytes<'_, INLINE_BYTES>>,
     ) -> Self {
-        let data = data.read().unwrap();
+        let data = data.read().unwrap_or_else(|e| e.into_inner());
 
         // Determine the start key for the BTreeMap range scan.
         let start_key: Vec<u8> = match range.start() {
