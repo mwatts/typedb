@@ -13,19 +13,49 @@ use crate::keyspaces::KEYSPACE_MAXIMUM_COUNT;
 
 pub enum KVWriteBatch {
     RocksDB(rocksdb::WriteBatch),
+    Buffered(BufferedWriteBatch),
 }
 
 impl KVWriteBatch {
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         match self {
             Self::RocksDB(b) => rocksdb::WriteBatch::put(b, key, value),
+            Self::Buffered(b) => b.put(key, value),
         }
     }
 }
 
 impl Default for KVWriteBatch {
     fn default() -> Self {
-        Self::RocksDB(rocksdb::WriteBatch::default())
+        Self::Buffered(BufferedWriteBatch::new())
+    }
+}
+
+/// A backend-agnostic write batch that buffers operations in memory.
+/// Used as the default write batch type, and consumed directly by the
+/// in-memory backend. The RocksDB backend converts this to a
+/// `rocksdb::WriteBatch` on write.
+pub struct BufferedWriteBatch {
+    pub(crate) ops: Vec<BufferedWriteOp>,
+}
+
+pub(crate) enum BufferedWriteOp {
+    Put(Box<[u8]>, Box<[u8]>),
+}
+
+impl BufferedWriteBatch {
+    pub fn new() -> Self {
+        Self { ops: Vec::new() }
+    }
+
+    pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
+        self.ops.push(BufferedWriteOp::Put(key.as_ref().into(), value.as_ref().into()));
+    }
+}
+
+impl Default for BufferedWriteBatch {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
