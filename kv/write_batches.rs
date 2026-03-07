@@ -11,15 +11,24 @@ use std::{
 
 use crate::keyspaces::KEYSPACE_MAXIMUM_COUNT;
 
+/// Wraps a `rocksdb::WriteBatch` in a `pub(crate)` newtype so that
+/// `KVWriteBatch::RocksDB` cannot be constructed from outside the `kv` crate.
+/// External callers must use `KVWriteBatch::default()` (which yields `Buffered`);
+/// the RocksDB backend converts the buffered batch to a native `WriteBatch` on
+/// write. This prevents the runtime `unreachable!` in `KVStore::write` that
+/// would fire if a RocksDB batch were routed to an in-memory store.
+pub(crate) struct RocksWriteBatch(pub(crate) rocksdb::WriteBatch);
+
 pub enum KVWriteBatch {
-    RocksDB(rocksdb::WriteBatch),
+    /// Only constructible within the `kv` crate (see [`RocksWriteBatch`]).
+    RocksDB(RocksWriteBatch),
     Buffered(BufferedWriteBatch),
 }
 
 impl KVWriteBatch {
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         match self {
-            Self::RocksDB(b) => rocksdb::WriteBatch::put(b, key, value),
+            Self::RocksDB(b) => rocksdb::WriteBatch::put(&mut b.0, key, value),
             Self::Buffered(b) => b.put(key, value),
         }
     }
