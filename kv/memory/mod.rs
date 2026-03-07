@@ -19,7 +19,7 @@ use primitive::key_range::KeyRange;
 use resource::profile::StorageCounters;
 
 use crate::{
-    keyspaces::{KeyspaceId, KeyspaceSet, Keyspaces, KeyspacesError},
+    keyspaces::{KeyspaceSet, Keyspaces, KeyspacesError},
     memory::iterator::InMemoryRangeIterator,
     write_batches::{BufferedWriteBatch, BufferedWriteOp},
     KVStore, KVStoreID,
