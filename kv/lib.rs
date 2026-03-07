@@ -94,7 +94,7 @@ impl KVStore {
     pub fn write(&self, write_batch: write_batches::KVWriteBatch) -> Result<(), Box<dyn TypeDBError>> {
         use write_batches::{BufferedWriteOp, KVWriteBatch};
         match (self, write_batch) {
-            (Self::RocksDB(s), KVWriteBatch::RocksDB(b)) => s.write(b),
+            (Self::RocksDB(s), KVWriteBatch::RocksDB(b)) => s.write(b.0),
             (Self::RocksDB(s), KVWriteBatch::Buffered(b)) => {
                 let mut rocks_batch = rocksdb::WriteBatch::default();
                 for op in b.ops {
