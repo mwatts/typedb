@@ -20,7 +20,7 @@ use fail_point::{
 use itertools::Itertools;
 use kv::{
     keyspaces::{KeyspaceSet, Keyspaces, KeyspacesError},
-    KVStore,
+    KVBackend,
 };
 use same_file::is_same_file;
 use tracing::{debug, trace};
@@ -153,8 +153,9 @@ impl CheckpointReader {
                 .map_err(|error| CheckpointRestore { dir: self.directory.clone(), source: Arc::new(error) })?;
         }
 
-        let keyspaces =
-            KVStore::open_keyspaces::<KS>(keyspaces_dir).map_err(|error| KeyspacesOpen { typedb_source: error })?;
+        let keyspaces = KVBackend::RocksDB
+            .open_keyspaces::<KS>(keyspaces_dir)
+            .map_err(|error| KeyspacesOpen { typedb_source: error })?;
 
         trace!("Finished recovering keyspaces, recovering missing commits");
 

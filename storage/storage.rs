@@ -30,7 +30,7 @@ use kv::{
     iterator::KVRangeIterator,
     keyspaces::{KeyspaceId, KeyspaceSet, Keyspaces, KeyspacesError},
     write_batches::{KVWriteBatch, WriteBatches},
-    KVStore,
+    KVBackend, KVStore,
 };
 use lending_iterator::LendingIterator;
 use logger::{error, result::ResultExt};
@@ -113,7 +113,8 @@ impl<Durability> MVCCStorage<Durability> {
         name: impl AsRef<str>,
         storage_dir: &Path,
     ) -> Result<Keyspaces, StorageOpenError> {
-        let keyspaces = KVStore::open_keyspaces::<KS>(&storage_dir)
+        let keyspaces = KVBackend::RocksDB
+            .open_keyspaces::<KS>(storage_dir)
             .map_err(|err| StorageOpenError::KeyspaceOpen { name: name.as_ref().to_owned(), typedb_source: err })?;
         Ok(keyspaces)
     }
@@ -713,7 +714,7 @@ mod tests {
                 .unwrap();
 
             let partial_commit = WriteBatches::from_operations(seq, &partial_operations);
-            let keyspaces = KVStore::open_keyspaces::<TestKeyspaceSet>(
+            let keyspaces = KVBackend::RocksDB.open_keyspaces::<TestKeyspaceSet>(
                 storage_path.join(MVCCStorage::<WALClient>::STORAGE_DIR_NAME).as_path(),
             )
             .unwrap();

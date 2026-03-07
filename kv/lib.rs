@@ -29,16 +29,35 @@ pub enum KVStore {
     InMemory(InMemoryKVStore),
 }
 
+/// Selects which storage backend is used when opening a set of keyspaces.
+///
+/// Pass a `KVBackend` value to [`KVBackend::open_keyspaces`] instead of calling
+/// the old associated functions on `KVStore` directly. This makes the backend
+/// choice explicit at every call site and resolves the ambiguity that previously
+/// existed when `KVStore::open_keyspaces` always silently picked RocksDB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KVBackend {
+    /// Persistent RocksDB-backed storage. Used in production.
+    RocksDB,
+    /// Ephemeral in-memory storage backed by a `BTreeMap`. Suitable for tests
+    /// and environments where persistence is not available (e.g. WASM).
+    InMemory,
+}
+
+impl KVBackend {
+    /// Open (or create) a set of keyspaces using this backend.
+    ///
+    /// For `RocksDB`, `storage_dir` is the directory under which per-keyspace
+    /// subdirectories are created. For `InMemory`, `storage_dir` is ignored.
+    pub fn open_keyspaces<KS: KeyspaceSet>(self, storage_dir: &Path) -> Result<Keyspaces, KeyspacesError> {
+        match self {
+            Self::RocksDB => RocksKVStore::open_keyspaces::<KS>(storage_dir),
+            Self::InMemory => InMemoryKVStore::open_keyspaces::<KS>(storage_dir),
+        }
+    }
+}
+
 impl KVStore {
-    pub fn open_keyspaces<KS: KeyspaceSet>(storage_dir: &Path) -> Result<Keyspaces, KeyspacesError> {
-        // TODO: here we have to pick the storage type? Or is it above?
-        RocksKVStore::open_keyspaces::<KS>(storage_dir)
-    }
-
-    pub fn open_keyspaces_in_memory<KS: KeyspaceSet>() -> Result<Keyspaces, KeyspacesError> {
-        InMemoryKVStore::open_keyspaces::<KS>(Path::new(""))
-    }
-
     pub fn id(&self) -> KVStoreID {
         match self {
             Self::RocksDB(s) => s.id(),
