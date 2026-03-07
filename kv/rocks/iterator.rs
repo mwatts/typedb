@@ -173,8 +173,22 @@ impl IteratorItemState {
     }
 }
 
-/// SAFETY NOTE: `'static` here represents that the `DBIterator` owns the data.
-/// The item's lifetime is in fact invalidated when `iterator` is advanced.
+/// Wraps a `DBRawIterator` obtained from [`RocksRawIteratorPool`] and implements
+/// the lending-iterator protocol over it.
+///
+/// # Safety invariant
+///
+/// The inner `iterator` is typed as `DBRawIterator<'static>`, but the `'static`
+/// is a lie: the data it points to is actually owned by the `RocksKVStore`'s `DB`.
+/// The transmute is performed in [`RocksRawIteratorPool`]; see the SAFETY comment
+/// there for the full justification.
+///
+/// Within *this* type the critical rule is: **the `KeyValue` slice references stored
+/// in `IteratorItemState::Some` are invalidated the moment the underlying RocksDB
+/// iterator is advanced** (i.e., when `DBRawIterator::next()` or `::seek()` is
+/// called). The `take_value_else_retain` discipline in `next_internal` ensures the
+/// previously yielded `Some` is consumed and cleared before the iterator advances,
+/// so no dangling reference is ever returned to the caller.
 pub(super) struct DBIterator {
     iterator: PoolRecycleGuard<DBRawIterator<'static>>,
     storage_counters: StorageCounters,
@@ -225,6 +239,14 @@ impl DBIterator {
                 Err(err) => IteratorItemState::Err(err),
             },
             Some(item) => {
+                // SAFETY: The slice references returned by `DBRawIterator::item()` are
+                // valid only until the iterator is next advanced. We extend them to
+                // `'static` so they can be stored in `IteratorItemState` alongside the
+                // iterator itself (a self-referential pattern). The invariant that
+                // prevents dangling: `take_value_else_retain` always clears the `Some`
+                // variant before `next_internal` calls `iterator.next()` or
+                // `iterator.seek()`, so the stored references are consumed before they
+                // become invalid. See the struct-level doc comment for full context.
                 let kv = unsafe { transmute::<KeyValue<'_>, KeyValue<'static>>(item) };
                 IteratorItemState::Some(kv)
             }
