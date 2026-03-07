@@ -57,7 +57,7 @@ impl InMemoryKVStore {
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn TypeDBError>> {
-        let mut data = self.data.write().unwrap();
+        let mut data = self.data.write().unwrap_or_else(|e| e.into_inner());
         data.insert(key.into(), value.into());
         Ok(())
     }
@@ -66,7 +66,7 @@ impl InMemoryKVStore {
     where
         M: FnMut(&[u8]) -> V,
     {
-        let data = self.data.read().unwrap();
+        let data = self.data.read().unwrap_or_else(|e| e.into_inner());
         Ok(data.get(key).map(|v| mapper(v)))
     }
 
@@ -74,7 +74,7 @@ impl InMemoryKVStore {
     where
         M: FnMut(&[u8], &[u8]) -> T,
     {
-        let data = self.data.read().unwrap();
+        let data = self.data.read().unwrap_or_else(|e| e.into_inner());
         use std::ops::Bound;
         let key_boxed: Box<[u8]> = key.into();
         data.range::<Box<[u8]>, _>((Bound::Unbounded, Bound::Included(key_boxed)))
@@ -92,7 +92,7 @@ impl InMemoryKVStore {
     }
 
     pub fn write(&self, write_batch: BufferedWriteBatch) -> Result<(), Box<dyn TypeDBError>> {
-        let mut data = self.data.write().unwrap();
+        let mut data = self.data.write().unwrap_or_else(|e| e.into_inner());
         for op in write_batch.ops {
             match op {
                 BufferedWriteOp::Put(key, value) => {
@@ -112,19 +112,19 @@ impl InMemoryKVStore {
     }
 
     pub fn reset(&mut self) -> Result<(), Box<dyn TypeDBError>> {
-        let mut data = self.data.write().unwrap();
+        let mut data = self.data.write().unwrap_or_else(|e| e.into_inner());
         data.clear();
         Ok(())
     }
 
     pub fn estimate_size_in_bytes(&self) -> Result<u64, Box<dyn TypeDBError>> {
-        let data = self.data.read().unwrap();
+        let data = self.data.read().unwrap_or_else(|e| e.into_inner());
         let size: usize = data.iter().map(|(k, v)| k.len() + v.len()).sum();
         Ok(size as u64)
     }
 
     pub fn estimate_key_count(&self) -> Result<u64, Box<dyn TypeDBError>> {
-        let data = self.data.read().unwrap();
+        let data = self.data.read().unwrap_or_else(|e| e.into_inner());
         Ok(data.len() as u64)
     }
 }
