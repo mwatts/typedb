@@ -44,6 +44,9 @@ impl RocksKVStore {
         // initial read options, should be customised to this storage's properties
         let read_options = ReadOptions::default();
         let mut write_options = WriteOptions::default();
+        // TypeDB manages its own write-ahead log via the `durability/` crate (WAL). RocksDB's
+        // internal WAL is therefore redundant and is explicitly disabled here. Enabling it would
+        // cause double-logging and would not participate in TypeDB's crash-recovery protocol.
         write_options.disable_wal(true);
         let pool = iterpool::RocksRawIteratorPool::new();
         Self { path, name, id, rocks, rocks_raw_iterator_pool: pool, read_options, write_options, prefix_length }
