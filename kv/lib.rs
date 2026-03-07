@@ -5,6 +5,7 @@
  */
 pub mod iterator;
 pub mod keyspaces;
+pub mod memory;
 pub mod rocks;
 pub mod write_batches;
 
@@ -18,12 +19,14 @@ use resource::profile::StorageCounters;
 use crate::{
     iterator::KVRangeIterator,
     keyspaces::{KeyspaceSet, Keyspaces, KeyspacesError},
+    memory::InMemoryKVStore,
     rocks::RocksKVStore,
 };
 
 #[derive(Debug)]
 pub enum KVStore {
     RocksDB(RocksKVStore),
+    InMemory(InMemoryKVStore),
 }
 
 impl KVStore {
@@ -32,21 +35,28 @@ impl KVStore {
         RocksKVStore::open_keyspaces::<KS>(storage_dir)
     }
 
+    pub fn open_keyspaces_in_memory<KS: KeyspaceSet>() -> Result<Keyspaces, KeyspacesError> {
+        InMemoryKVStore::open_keyspaces::<KS>(Path::new(""))
+    }
+
     pub fn id(&self) -> KVStoreID {
         match self {
             Self::RocksDB(s) => s.id(),
+            Self::InMemory(s) => s.id(),
         }
     }
 
     pub fn name(&self) -> &'static str {
         match self {
             Self::RocksDB(s) => s.name(),
+            Self::InMemory(s) => s.name(),
         }
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn TypeDBError>> {
         match self {
             Self::RocksDB(s) => s.put(key, value),
+            Self::InMemory(s) => s.put(key, value),
         }
     }
 
@@ -56,6 +66,7 @@ impl KVStore {
     {
         match self {
             Self::RocksDB(s) => s.get(key, mapper),
+            Self::InMemory(s) => s.get(key, mapper),
         }
     }
 
@@ -65,6 +76,7 @@ impl KVStore {
     {
         match self {
             Self::RocksDB(s) => s.get_prev(key, mapper),
+            Self::InMemory(s) => s.get_prev(key, mapper),
         }
     }
 
@@ -75,42 +87,62 @@ impl KVStore {
     ) -> KVRangeIterator {
         match self {
             Self::RocksDB(s) => KVRangeIterator::RocksDB(s.iterate_range(range, storage_counters)),
+            Self::InMemory(s) => KVRangeIterator::InMemory(s.iterate_range(range, storage_counters)),
         }
     }
 
     pub fn write(&self, write_batch: write_batches::KVWriteBatch) -> Result<(), Box<dyn TypeDBError>> {
+        use write_batches::{BufferedWriteOp, KVWriteBatch};
         match (self, write_batch) {
-            (Self::RocksDB(s), write_batches::KVWriteBatch::RocksDB(b)) => s.write(b),
+            (Self::RocksDB(s), KVWriteBatch::RocksDB(b)) => s.write(b),
+            (Self::RocksDB(s), KVWriteBatch::Buffered(b)) => {
+                let mut rocks_batch = rocksdb::WriteBatch::default();
+                for op in b.ops {
+                    match op {
+                        BufferedWriteOp::Put(key, value) => rocks_batch.put(key, value),
+                    }
+                }
+                s.write(rocks_batch)
+            }
+            (Self::InMemory(s), KVWriteBatch::Buffered(b)) => s.write(b),
+            (Self::InMemory(_), KVWriteBatch::RocksDB(_)) => {
+                unreachable!("cannot write RocksDB WriteBatch to InMemory store")
+            }
         }
     }
 
     pub fn checkpoint(&self, checkpoint_dir: &Path) -> Result<(), Box<dyn TypeDBError>> {
         match self {
             Self::RocksDB(s) => s.checkpoint(checkpoint_dir),
+            Self::InMemory(s) => s.checkpoint(checkpoint_dir),
         }
     }
 
     pub fn delete(self) -> Result<(), Box<dyn TypeDBError>> {
         match self {
             Self::RocksDB(s) => s.delete(),
+            Self::InMemory(s) => s.delete(),
         }
     }
 
     pub fn reset(&mut self) -> Result<(), Box<dyn TypeDBError>> {
         match self {
             Self::RocksDB(s) => s.reset(),
+            Self::InMemory(s) => s.reset(),
         }
     }
 
     pub fn estimate_size_in_bytes(&self) -> Result<u64, Box<dyn TypeDBError>> {
         match self {
             Self::RocksDB(s) => s.estimate_size_in_bytes(),
+            Self::InMemory(s) => s.estimate_size_in_bytes(),
         }
     }
 
     pub fn estimate_key_count(&self) -> Result<u64, Box<dyn TypeDBError>> {
         match self {
             Self::RocksDB(s) => s.estimate_key_count(),
+            Self::InMemory(s) => s.estimate_key_count(),
         }
     }
 }
