@@ -40,6 +40,11 @@ pub struct BufferedWriteBatch {
 }
 
 pub(crate) enum BufferedWriteOp {
+    // NOTE: There is intentionally no `Delete` variant here. TypeDB's MVCC layer encodes
+    // logical deletes as a `Put` with an empty value (a "tombstone"), so KV-level deletes
+    // are never issued through a write batch. If a future backend needs true KV-level
+    // deletes (e.g. for compaction or non-MVCC paths), a `Delete(Box<[u8]>)` variant and
+    // corresponding dispatch in `KVStore::write` will be required.
     Put(Box<[u8]>, Box<[u8]>),
 }
 
