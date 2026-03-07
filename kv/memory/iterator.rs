@@ -42,11 +42,39 @@ impl InMemoryRangeIterator {
             }
         };
 
-        // Collect all entries from the start key onwards. We'll filter the end
-        // condition during iteration, matching the RocksDB backend behavior.
+        // Collect only the entries that fall within the requested range. We apply the
+        // `continue_condition` end-bound eagerly here rather than lazily in `next()`,
+        // avoiding cloning entries that would immediately be rejected. This mirrors what
+        // RocksDB does with its bloom-filter and prefix-seek optimisations.
         let start_boxed: Box<[u8]> = start_key.into_boxed_slice();
-        let entries: Vec<(Box<[u8]>, Box<[u8]>)> =
-            data.range::<Box<[u8]>, _>(start_boxed..).map(|(k, v)| (k.clone(), v.clone())).collect();
+
+        // Determine the upper bound for the BTreeMap range scan from the end condition.
+        let entries: Vec<(Box<[u8]>, Box<[u8]>)> = match range.end() {
+            RangeEnd::WithinStartAsPrefix => {
+                let prefix: Box<[u8]> = range.start().get_value().as_ref().into();
+                data.range::<Box<[u8]>, _>(start_boxed..)
+                    .take_while(|(k, _)| k.starts_with(&prefix))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            }
+            RangeEnd::EndPrefixInclusive(end) => {
+                let end_box: Box<[u8]> = end.as_ref().into();
+                data.range::<Box<[u8]>, _>(start_boxed..)
+                    .take_while(|(k, _)| k.as_ref() <= end_box.as_ref() || k.starts_with(&end_box))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            }
+            RangeEnd::EndPrefixExclusive(end) => {
+                let end_box: Box<[u8]> = end.as_ref().into();
+                data.range::<Box<[u8]>, _>(start_boxed..)
+                    .take_while(|(k, _)| k.as_ref() < end_box.as_ref())
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            }
+            RangeEnd::Unbounded => {
+                data.range::<Box<[u8]>, _>(start_boxed..).map(|(k, v)| (k.clone(), v.clone())).collect()
+            }
+        };
 
         let continue_condition = match range.end() {
             RangeEnd::WithinStartAsPrefix => {
