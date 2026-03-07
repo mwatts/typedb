@@ -11,12 +11,13 @@ use error::TypeDBError;
 use lending_iterator::{LendingIterator, Seekable};
 use resource::constants::kv::ITERATOR_CONTINUE_CONDITION_INLINE;
 
-use crate::rocks::iterator::RocksRangeIterator;
+use crate::{memory::iterator::InMemoryRangeIterator, rocks::iterator::RocksRangeIterator};
 
 pub type KVIteratorItem<'a> = Result<(&'a [u8], &'a [u8]), Box<dyn TypeDBError>>;
 
 pub enum KVRangeIterator {
     RocksDB(RocksRangeIterator),
+    InMemory(InMemoryRangeIterator),
 }
 
 impl LendingIterator for KVRangeIterator {
@@ -25,6 +26,7 @@ impl LendingIterator for KVRangeIterator {
     fn next(&mut self) -> Option<Self::Item<'_>> {
         match self {
             Self::RocksDB(iter) => iter.next(),
+            Self::InMemory(iter) => iter.next(),
         }
     }
 }
@@ -33,12 +35,14 @@ impl Seekable<[u8]> for KVRangeIterator {
     fn seek(&mut self, key: &[u8]) {
         match self {
             Self::RocksDB(iter) => iter.seek(key),
+            Self::InMemory(iter) => iter.seek(key),
         }
     }
 
     fn compare_key(&self, item: &Self::Item<'_>, key: &[u8]) -> Ordering {
         match self {
             Self::RocksDB(iter) => iter.compare_key(item, key),
+            Self::InMemory(iter) => iter.compare_key(item, key),
         }
     }
 }
