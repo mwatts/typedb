@@ -43,7 +43,7 @@ impl InMemoryKVStore {
             keyspaces.validate_new_keyspace(keyspace)?;
             let kv = InMemoryKVStore::new(keyspace.name(), keyspace.id().into());
             keyspaces.keyspaces.push(KVStore::InMemory(kv));
-            keyspaces.index[keyspace.id().0 as usize] = Some(KeyspaceId(keyspaces.keyspaces.len() as u8 - 1));
+            keyspaces.vec_pos_by_id[keyspace.id().0 as usize] = Some(keyspaces.keyspaces.len() - 1);
         }
         Ok(keyspaces)
     }

@@ -48,12 +48,17 @@ pub trait KeyspaceSet: Copy {
 #[derive(Debug)]
 pub struct Keyspaces {
     pub(crate) keyspaces: Vec<KVStore>,
-    pub(crate) index: [Option<KeyspaceId>; KEYSPACE_MAXIMUM_COUNT],
+    /// Maps `KeyspaceId` (as a `usize` array index) to the position of the
+    /// corresponding `KVStore` in `self.keyspaces`. Storing the vec position
+    /// separately from the keyspace ID allows keyspaces to be appended to
+    /// `self.keyspaces` in registration order while still being looked up by
+    /// their (potentially non-contiguous) IDs in O(1).
+    pub(crate) vec_pos_by_id: [Option<usize>; KEYSPACE_MAXIMUM_COUNT],
 }
 
 impl Keyspaces {
     pub(crate) fn new() -> Self {
-        Self { keyspaces: Vec::new(), index: std::array::from_fn(|_| None) }
+        Self { keyspaces: Vec::new(), vec_pos_by_id: std::array::from_fn(|_| None) }
     }
 
     pub(crate) fn validate_new_keyspace(&self, keyspace_id: impl KeyspaceSet) -> Result<(), KeyspacesError> {
@@ -69,9 +74,9 @@ impl Keyspaces {
             return Err(IdTooLarge { name, id: keyspace_id.id().0, max_id: KEYSPACE_ID_MAX.0 });
         }
 
-        for (existing_id, existing_keyspace_index) in self.index.iter().enumerate() {
-            if let Some(existing_index) = existing_keyspace_index {
-                let keyspace = &self.keyspaces[existing_index.0 as usize];
+        for (existing_id, existing_vec_pos) in self.vec_pos_by_id.iter().enumerate() {
+            if let Some(vec_pos) = existing_vec_pos {
+                let keyspace = &self.keyspaces[*vec_pos];
                 if keyspace.name() == name {
                     return Err(NameExists { name });
                 }
@@ -91,12 +96,12 @@ impl Keyspaces {
             KEYSPACE_MAXIMUM_COUNT - 1
         );
         debug_assert!(
-            self.index[keyspace_id.0 as usize].is_some(),
+            self.vec_pos_by_id[keyspace_id.0 as usize].is_some(),
             "keyspace_id {} has not been registered",
             keyspace_id.0
         );
-        let keyspace_index = self.index[keyspace_id.0 as usize].unwrap();
-        &self.keyspaces[keyspace_index.0 as usize]
+        let vec_pos = self.vec_pos_by_id[keyspace_id.0 as usize].unwrap();
+        &self.keyspaces[vec_pos]
     }
 
     pub fn write(&self, write_batches: WriteBatches) -> Result<(), KeyspacesError> {
