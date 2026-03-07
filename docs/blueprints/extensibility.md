@@ -6,7 +6,7 @@ status: draft
 
 Two orthogonal extension axes for TypeDB:
 
-1. **Storage Backend Abstraction** — decouple from RocksDB, enable redb (and others)
+1. **Storage Backend Abstraction** — decouple from RocksDB, enable alternative backends
 2. **Value Type Extensibility** — reduce the cost of adding types like `vector<N>`
 
 These are designed to be **independent workstreams** that can proceed in parallel.
@@ -17,221 +17,156 @@ descriptor metadata), documented below.
 
 # PART 1: STORAGE BACKEND ABSTRACTION
 
-## Current State
+## Completed: The `kv` Crate (Enum Dispatch)
 
-RocksDB is well-encapsulated. Consumer code (71+ files across executor, concept,
-compiler, query) interacts only through snapshot traits:
+The `replaceable-storage` branch introduced the `kv/` crate, which provides a
+backend-agnostic key-value interface using **enum dispatch**. This is now merged
+and is the foundation for all future backend work.
 
-```
-Consumer code  →  ReadableSnapshot / WritableSnapshot / CommittableSnapshot
-                          ↓
-                  MVCCStorage<D: DurabilityClient>
-                          ↓
-                  Keyspaces → Vec<Keyspace>  (one RocksDB DB per keyspace)
-                          ↓
-                  rocksdb::DB / rocksdb::DBRawIterator
-```
-
-**RocksDB import locations outside storage/:**
-
-| Crate | File | What it imports | Why |
-|-------|------|-----------------|-----|
-| `encoding` | `encoding/encoding.rs` | `BlockBasedOptions`, `DBCompressionType`, `SliceTransform` | `EncodingKeyspace::rocks_configuration()` |
-| `common/cache` | `Cargo.toml` | `rocksdb` crate dependency | Unclear — needs investigation |
-
-Everything else (database, server, executor, concept, compiler, query) uses only
-the snapshot traits. **No RocksDB types leak to consumers.**
-
-**Custom MVCC layer:** TypeDB builds its own MVCC on top of RocksDB using
-inverted sequence numbers appended to keys, an `IsolationManager`, and a
-`Timeline`. RocksDB is used as a dumb ordered byte store.
-
-## Target Architecture
+### Architecture
 
 ```
 Consumer code  →  ReadableSnapshot / WritableSnapshot / CommittableSnapshot  (UNCHANGED)
                           ↓
-                  MVCCStorage<B: StorageBackend, D: DurabilityClient>
+                  MVCCStorage<D: DurabilityClient>
                           ↓
-                  StorageBackend trait  ← NEW
-                    ├── RocksDbBackend  (extracted from current code)
-                    └── RedbBackend    (new implementation)
+                  Keyspaces → Vec<KVStore>   (kv/ crate)
+                          ↓
+                  KVStore enum dispatch
+                    └── KVStore::RocksDB(RocksKVStore)    (kv/rocks/)
+                    └── (future: InMemory, Redb, WASM, etc.)
 ```
 
-## Design
+### Key Design Decisions
 
-### 1.1 StorageBackend Trait
+Three approaches were evaluated:
+
+| Approach | Pros | Cons | Decision |
+|----------|------|------|----------|
+| **Trait-based** (`trait KVStore`) | Conceptually cleanest | Generic parameter propagates everywhere — huge surface area in `//concept`, `//traversal`, etc. | Rejected |
+| **Trait objects** (`dyn KVStore`) | Keeps strong typing hidden in `//storage` | Many required traits (`KVStore`, iterators) are not object-safe. Requires `Any` downcasting workarounds. | Rejected |
+| **Enum dispatch** | Zero-cost for single-backend builds. No generic propagation. Scales to N backends cleanly. Feature-flag friendly. | Match arms grow linearly with backends (acceptable). | **Chosen** |
+
+### What Was Implemented
+
+**New `kv/` crate** with these core types:
 
 ```rust
-// storage/backend/mod.rs
+// kv/lib.rs — Enum dispatch for KV backends
+pub enum KVStore {
+    RocksDB(RocksKVStore),
+    // Future variants: InMemory(...), Redb(...), etc.
+}
 
-/// Minimal trait for a sorted key-value store backend.
-///
-/// The backend is unaware of MVCC — it stores and retrieves opaque byte keys
-/// and values. MVCC key encoding (sequence numbers, operation tags) happens
-/// in the layer above.
-pub trait StorageBackend: Send + Sync + 'static {
-    type Config: Send + Sync + Clone;
-    type Keyspace: KeyspaceOps + Send + Sync;
-    type WriteBatch: BackendWriteBatch + Send;
-
-    /// Open or create a database at the given path with the specified keyspaces.
-    fn open(path: &Path, keyspaces: &[KeyspaceDescriptor], config: &Self::Config)
-        -> Result<Self, StorageOpenError>
-    where
-        Self: Sized;
-
-    /// Get a handle to a specific keyspace by ID.
-    fn keyspace(&self, id: KeyspaceId) -> &Self::Keyspace;
-
-    /// Create a checkpoint (for backup/recovery).
-    fn checkpoint(&self, path: &Path) -> Result<(), CheckpointCreateError>;
-
-    /// Estimated total size on disk.
-    fn estimated_size_bytes(&self) -> u64;
-
-    /// Delete a database at the given path.
-    fn delete(path: &Path) -> Result<(), StorageDeleteError>
-    where
-        Self: Sized;
+impl KVStore {
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn TypeDBError>>;
+    pub fn get<M, V>(&self, key: &[u8], mapper: M) -> Result<Option<V>, Box<dyn TypeDBError>>;
+    pub fn get_prev<M, T>(&self, key: &[u8], mapper: M) -> Option<T>;
+    pub fn iterate_range(&self, range: &KeyRange<...>, counters: StorageCounters) -> KVRangeIterator;
+    pub fn write(&self, write_batch: KVWriteBatch) -> Result<(), Box<dyn TypeDBError>>;
+    pub fn checkpoint(&self, checkpoint_dir: &Path) -> Result<(), Box<dyn TypeDBError>>;
+    pub fn delete(self) -> Result<(), Box<dyn TypeDBError>>;
+    pub fn reset(&mut self) -> Result<(), Box<dyn TypeDBError>>;
+    pub fn estimate_size_in_bytes(&self) -> Result<u64, Box<dyn TypeDBError>>;
+    pub fn estimate_key_count(&self) -> Result<u64, Box<dyn TypeDBError>>;
 }
 ```
-
-### 1.2 KeyspaceOps Trait
 
 ```rust
-// storage/backend/mod.rs
-
-pub trait KeyspaceOps: Send + Sync {
-    /// Point lookup. Returns owned bytes.
-    fn get(&self, key: &[u8]) -> Result<Option<ByteArray<BUFFER_VALUE_INLINE>>, KeyspaceError>;
-
-    /// Point lookup with zero-copy callback. The callback receives the value
-    /// bytes while the internal lock/pin is held.
-    fn get_mapped<T>(
-        &self,
-        key: &[u8],
-        f: impl FnOnce(&[u8]) -> T,
-    ) -> Result<Option<T>, KeyspaceError>;
-
-    /// Seek to the largest key <= the given key and return it.
-    /// Used by MVCC to find the latest visible version.
-    fn get_prev(&self, key: &[u8]) -> Result<Option<(ByteArray<48>, ByteArray<48>)>, KeyspaceError>;
-
-    /// Forward range iteration. The returned iterator yields (key, value) pairs
-    /// in ascending byte order.
-    fn iterate_range<'a>(
-        &'a self,
-        range: KeyRange<'_>,
-        pool: &'a IteratorPool,
-    ) -> impl BackendIterator + 'a;
-
-    /// Create a new write batch for atomic multi-key writes.
-    fn new_write_batch(&self) -> impl BackendWriteBatch;
-
-    /// Apply a write batch atomically.
-    fn write(&self, batch: impl BackendWriteBatch) -> Result<(), KeyspaceError>;
+// kv/iterator.rs — Enum dispatch for iterators
+pub enum KVRangeIterator {
+    RocksDB(RocksRangeIterator),
 }
+impl LendingIterator for KVRangeIterator { ... }
+impl Seekable<[u8]> for KVRangeIterator { ... }
 ```
-
-### 1.3 BackendIterator Trait
 
 ```rust
-// storage/backend/iterator.rs
-
-/// A lending iterator over sorted key-value pairs.
-///
-/// This follows the same pattern as the current MVCCRangeIterator: peek
-/// returns a reference valid until the next call to advance().
-pub trait BackendIterator {
-    fn peek(&mut self) -> Option<Result<(&[u8], &[u8]), BackendReadError>>;
-    fn advance(&mut self);
-    fn seek(&mut self, key: &[u8]);
+// kv/write_batches.rs — Enum dispatch for write batches
+pub enum KVWriteBatch {
+    RocksDB(rocksdb::WriteBatch),
 }
 
-pub trait BackendWriteBatch {
-    fn put(&mut self, key: &[u8], value: &[u8]);
-    fn delete(&mut self, key: &[u8]);
-    fn len(&self) -> usize;
+pub struct WriteBatches {
+    pub batches: [Option<KVWriteBatch>; KEYSPACE_MAXIMUM_COUNT],
 }
 ```
-
-### 1.4 KeyspaceDescriptor (Replaces KeyspaceSet)
-
-The current `KeyspaceSet` trait has a `rocks_configuration()` method that returns
-`rocksdb::Options`. This is the **only place** outside `storage/` that imports
-RocksDB types (in `encoding/encoding.rs`).
-
-Replace with a backend-agnostic descriptor:
 
 ```rust
-// storage/backend/mod.rs
+// kv/keyspaces.rs — Backend-agnostic keyspace management
+pub trait KeyspaceSet: Copy {
+    fn iter() -> impl Iterator<Item = Self>;
+    fn id(&self) -> KeyspaceId;
+    fn name(&self) -> &'static str;
+    fn prefix_length(&self) -> Option<usize>;
+}
 
-/// Backend-agnostic description of a keyspace's access patterns.
-/// Backends use this to configure their internal optimizations
-/// (bloom filters, prefix extractors, page sizes, etc.)
-#[derive(Clone, Debug)]
-pub struct KeyspaceDescriptor {
-    pub id: KeyspaceId,
-    pub name: &'static str,
-    /// Common prefix length for keys in this keyspace.
-    /// Backends can use this for bloom filter / prefix extractor configuration.
-    pub prefix_length: Option<usize>,
-    /// Whether all keys have the same length.
-    pub fixed_width_keys: bool,
+pub struct Keyspaces {
+    keyspaces: Vec<KVStore>,
+    index: [Option<KeyspaceId>; KEYSPACE_MAXIMUM_COUNT],
 }
 ```
 
-The `EncodingKeyspace` enum stays, but its `KeyspaceSet` implementation becomes:
+**RocksDB backend** in `kv/rocks/`:
+- `kv/rocks/mod.rs` — `RocksKVStore` struct with all RocksDB-specific configuration
+- `kv/rocks/iterator.rs` — `RocksRangeIterator` wrapping `DBRawIterator`
+- `kv/rocks/iterpool.rs` — Raw iterator pool (RocksDB-specific optimization)
+- `kv/rocks/pool.rs` — Connection pool
+
+### What Was Removed or Moved
+
+| Before | After | Notes |
+|--------|-------|-------|
+| `storage/keyspace/keyspace.rs` (420 lines) | `kv/rocks/mod.rs` | RocksDB logic extracted |
+| `storage/keyspace/raw_iterator.rs` (158 lines) | `kv/rocks/iterator.rs` | Iterator extracted |
+| `storage/keyspace/mod.rs` (47 lines) | `kv/keyspaces.rs` | Keyspace management moved |
+| `storage/keyspace/constants.rs` | `kv/keyspaces.rs` | Constants inlined |
+| `storage/write_batches.rs` (83 lines) | `kv/write_batches.rs` | Write batch types moved |
+| `storage/key_range.rs` | `common/primitive/key_range.rs` | Not storage-specific |
+| `encoding/encoding.rs` `rocks_configuration()` | `kv/rocks/mod.rs` `create_open_options()` | RocksDB config no longer leaks |
+
+### Current RocksDB Import Surface
+
+After the refactoring, RocksDB imports are contained to:
+
+| Location | What | Why |
+|----------|------|-----|
+| `kv/rocks/*` | All RocksDB types | The backend implementation |
+| `kv/write_batches.rs` | `rocksdb::WriteBatch` | Inside `KVWriteBatch::RocksDB` variant |
+| `storage/benches/` | Direct RocksDB for benchmarking | Test-only |
+
+**No consumer crate** (encoding, concept, compiler, executor, query, server,
+function, ir, database) imports RocksDB types. The `encoding` crate depends on
+`kv` only for `KeyspaceSet`/`KeyspaceId` — purely structural, no backend types.
+
+### Impact Summary
+
+- **73 files changed** across 76 modules
+- **Generic parameter `KV` removed** from storage, encoding, concept, database,
+  function, ir, and all higher-level crates
+- `MVCCStorage<D>` is now generic only over `DurabilityClient`, not the backend
+- All consumer code interacts through snapshot traits — unchanged
+
+## Remaining Storage Work
+
+### Phase S1: Add In-Memory Backend (Testing)
+
+Add a simple in-memory `BTreeMap`-based backend for faster unit tests and
+WASM compatibility exploration:
 
 ```rust
-impl EncodingKeyspace {
-    pub fn descriptor(&self) -> KeyspaceDescriptor {
-        KeyspaceDescriptor {
-            id: self.id(),
-            name: self.name(),
-            prefix_length: Some(self.prefix_length()),
-            fixed_width_keys: false,
-        }
-    }
+// kv/lib.rs
+pub enum KVStore {
+    RocksDB(RocksKVStore),
+    InMemory(InMemoryKVStore),  // NEW
 }
 ```
 
-Backend-specific tuning moves into each backend's `Config` type:
+- `kv/memory/mod.rs` — `InMemoryKVStore` backed by `BTreeMap<Vec<u8>, Vec<u8>>`
+- `kv/memory/iterator.rs` — Simple range iterator over BTreeMap
+- Enable via feature flag: `#[cfg(feature = "memory-backend")]`
 
-```rust
-pub struct RocksDbConfig {
-    pub cache_size_mb: usize,
-    pub compression_levels: Vec<CompressionType>,
-    pub target_file_size_base: u64,
-    pub write_buffer_size: u64,
-    pub max_write_buffer_number: i32,
-    pub max_background_jobs: i32,
-}
-
-pub struct RedbConfig {
-    pub cache_size_mb: usize,
-}
-```
-
-### 1.5 RocksDB Backend (Extraction)
-
-Extract the current implementation from:
-
-| Current file | Extracted to |
-|-------------|-------------|
-| `storage/keyspace/keyspace.rs` (Keyspace struct) | `storage/backend/rocksdb/keyspace.rs` |
-| `storage/keyspace/raw_iterator.rs` | `storage/backend/rocksdb/iterator.rs` |
-| `storage/keyspace/mod.rs` (IteratorPool) | `storage/backend/rocksdb/iterator_pool.rs` |
-| `encoding/encoding.rs` (rocks_configuration) | `storage/backend/rocksdb/config.rs` |
-
-The `Keyspaces` struct dissolves — `RocksDbBackend` holds a `Vec<RocksDbKeyspace>`
-directly.
-
-The `unsafe transmute` in `raw_iterator.rs` (for the lending iterator lifetime)
-stays in the RocksDB backend. The redb backend won't need it.
-
-### 1.6 redb Backend
+### Phase S2: Add redb Backend
 
 Key mapping from RocksDB concepts to redb:
 
@@ -242,75 +177,26 @@ Key mapping from RocksDB concepts to redb:
 | `WriteBatch` (applied atomically) | `WriteTransaction` (ACID built-in) |
 | `seek_for_prev()` | `range(..=key).rev().next()` |
 | `Checkpoint` | `Database::compact()` + file copy |
-| `SliceTransform` prefix bloom | Not needed — redb uses B-tree, prefix scan is efficient by default |
-| Column family options | Per-table configuration (minimal) |
+| Bloom filter prefix extractor | Not needed — redb uses B-tree |
 
 MVCC decision: **keep TypeDB's custom MVCC** for the initial implementation.
-redb's built-in ACID transactions are used only for write batch atomicity. This
-minimizes risk — the isolation semantics are identical regardless of backend.
+redb's built-in ACID transactions are used only for write batch atomicity.
 
 A future optimization could leverage redb's native snapshot isolation to
 eliminate the MVCC key overhead, but that's a separate project.
 
-### 1.7 IteratorPool Handling
+### Phase S3: Runtime Backend Selection
 
-The current `IteratorPool` recycles `DBRawIterator` instances to avoid allocation.
-This is a RocksDB-specific optimization (creating iterators is expensive due to
-memtable pinning).
-
-For the trait, make pooling backend-internal:
-
-```rust
-// In BackendIterator creation, the backend handles its own pooling.
-// RocksDbBackend maintains IteratorPool internally.
-// RedbBackend doesn't need pooling (redb iterators are cheap).
-```
-
-The `IteratorPool` type moves from `storage/keyspace/mod.rs` into
-`storage/backend/rocksdb/`. The snapshot layer no longer needs to pass pools
-around — the backend keyspace handle manages its own resources.
-
-### 1.8 Migration Plan
-
-**Phase S1: Define traits (no behavior change)**
-- Create `storage/backend/mod.rs` with `StorageBackend`, `KeyspaceOps`,
-  `BackendIterator`, `BackendWriteBatch` traits
-- Create `KeyspaceDescriptor` struct
-- Compile check: everything still builds
-
-**Phase S2: Extract RocksDB backend**
-- Move keyspace code to `storage/backend/rocksdb/`
-- Implement `StorageBackend` for `RocksDbBackend`
-- Move `rocks_configuration()` from `encoding/encoding.rs` into
-  `storage/backend/rocksdb/config.rs`
-- Remove `rocksdb` dependency from `encoding` crate
-- `EncodingKeyspace` now only provides `KeyspaceDescriptor`
-
-**Phase S3: Make MVCCStorage generic**
-- `MVCCStorage<B: StorageBackend, D: DurabilityClient>`
-- Replace `Keyspaces` field with `B`
-- Update snapshot types to carry `B` generic
-- Update `database.rs` to instantiate with `RocksDbBackend`
-- All consumer code unchanged (still uses trait objects / snapshot traits)
-
-**Phase S4: Implement redb backend**
-- `storage/backend/redb/mod.rs`
-- Implement all traits
-- Integration tests comparing both backends with identical workloads
-
-**Phase S5: Runtime backend selection**
 - Database creation accepts backend choice
 - Existing databases auto-detect their backend from metadata
 - Config flag / CLI option for default backend
+- Could even allow different backends per-database
 
-### 1.9 Risk Assessment
+### Phase S4: Per-Database Backend Configuration
 
-| Risk | Mitigation |
-|------|-----------|
-| `BackendIterator` lending lifetime is hard to express in traits | Use GAT (`type Iter<'a>: ... + 'a where Self: 'a`) or box the iterator. Prefer GAT for zero-cost on RocksDB path |
-| `get_prev()` semantics differ between backends | Specify contract precisely. redb's `range(..=key).rev().next()` is semantically equivalent |
-| Performance regression from trait indirection | Use monomorphization (`impl StorageBackend` in generic code, not `dyn`). Zero-cost at compile time |
-| IteratorPool removal from snapshot layer | RocksDB backend manages pools internally. No change in pool behavior, just ownership |
+The enum dispatch approach naturally supports this since each `KVStore` instance
+is independent. Different databases could use different backends without any
+architectural changes.
 
 ---
 
@@ -553,7 +439,7 @@ pub trait IndexStrategy: Send + Sync + 'static {
 ```
 
 This enables:
-- **BTreePrefixScanIndex** — existing behavior, works on any `StorageBackend`
+- **BTreePrefixScanIndex** — existing behavior, works on any backend
 - **RelationBinaryIndex** — existing `IndexedRelation`, extracted to this trait
 - **VectorANNIndex** — new, wraps usearch/faiss, responds to distance predicates
 
@@ -653,7 +539,7 @@ The two workstreams are intentionally independent:
 ```
                     Storage Backend Abstraction (Part 1)
                     ====================================
-                    Touches: storage/, encoding/encoding.rs (keyspace config only)
+                    Touches: kv/, storage/, common/primitive/
                     Does NOT touch: ValueType, Value, AttributeID, expressions,
                                     compiler, executor instruction dispatch
 
@@ -661,37 +547,36 @@ The two workstreams are intentionally independent:
                     =================================
                     Touches: encoding/value/, ir/pattern/, compiler/annotation/,
                              executor/instruction/, server/service/grpc/
-                    Does NOT touch: storage backend, keyspace, iterators, MVCC,
+                    Does NOT touch: kv/ backend, keyspace, iterators, MVCC,
                                     durability, snapshots
 ```
 
-**Shared touch point:** `encoding/encoding.rs` — Part 1 removes
-`rocks_configuration()` from here, Part 2 doesn't touch this file. No conflict.
+**Shared touch point:** `encoding/encoding.rs` — Part 1 already moved
+`rocks_configuration()` out of here. Part 2 doesn't touch this file. No conflict.
 
 **Dependency:** `AttributeStorageStrategy` (Part 2) calls methods on whatever
 storage backend is active (Part 1), but only through the existing
 `ReadableSnapshot` / `WritableSnapshot` traits which both workstreams preserve.
 
 **Recommended sequencing:** Either can go first. If working in parallel, the
-only coordination needed is that both agree on the `KeyspaceDescriptor` struct
-(Part 1 defines it, Part 2 doesn't modify it).
+only coordination needed is that both agree on the `KeyspaceSet` trait
+(Part 1 defines it in `kv/keyspaces.rs`, Part 2 doesn't modify it).
 
 ---
 
 # IMPLEMENTATION PRIORITY MATRIX
 
-| Phase | Workstream | Effort | Files changed | Risk |
-|-------|-----------|--------|---------------|------|
-| S1 | Storage: define traits | S | 2-3 new files | None |
-| S2 | Storage: extract RocksDB | M | ~8 files moved/refactored | Low |
-| V1 | Value: descriptor + registry | S | ~5 new files + startup wiring | None |
-| S3 | Storage: generic MVCCStorage | L | ~15 files (storage/, database/) | Medium |
-| V2 | Value: AttributeID unification | M | ~10 files in encoding/ | Low |
-| V3 | Value: expression op registry | M | ~10 files in compiler/ | Low |
-| S4 | Storage: redb implementation | M | ~4 new files + integration tests | Medium |
-| V4 | Value: index strategy trait | L | ~8 files in compiler/executor | Medium |
-| V5 | Value: protocol + TypeQL ext | M | External repo PRs required | Medium |
-| S5 | Storage: runtime selection | S | database.rs + CLI config | Low |
+| Phase | Workstream | Status | Effort | Risk |
+|-------|-----------|--------|--------|------|
+| S0 | Storage: `kv/` crate with enum dispatch | **DONE** | — | — |
+| S1 | Storage: in-memory backend (testing) | Pending | S | None |
+| V1 | Value: descriptor + registry | Pending | S | None |
+| S2 | Storage: redb backend | Pending | M | Medium |
+| V2 | Value: AttributeID unification | Pending | M | Low |
+| V3 | Value: expression op registry | Pending | M | Low |
+| S3 | Storage: runtime backend selection | Pending | S | Low |
+| V4 | Value: index strategy trait | Pending | L | Medium |
+| V5 | Value: protocol + TypeQL ext | Pending | M | Medium |
 
 S = small (1-3 days), M = medium (3-7 days), L = large (1-2 weeks)
 
@@ -699,29 +584,39 @@ S = small (1-3 days), M = medium (3-7 days), L = large (1-2 weeks)
 
 # APPENDIX: FILE INVENTORY
 
-## Files that change for Storage Backend Abstraction
+## Files Changed for Storage Backend Abstraction (COMPLETED)
 
-**New files:**
-- `storage/backend/mod.rs` — traits
-- `storage/backend/rocksdb/mod.rs` — extracted backend
-- `storage/backend/rocksdb/keyspace.rs` — extracted from `storage/keyspace/keyspace.rs`
-- `storage/backend/rocksdb/iterator.rs` — extracted from `storage/keyspace/raw_iterator.rs`
-- `storage/backend/rocksdb/iterator_pool.rs` — extracted from `storage/keyspace/mod.rs`
-- `storage/backend/rocksdb/config.rs` — extracted from `encoding/encoding.rs`
-- `storage/backend/redb/mod.rs` — new backend
+**New files (kv/ crate):**
+- `kv/lib.rs` — `KVStore` enum dispatch
+- `kv/iterator.rs` — `KVRangeIterator` enum dispatch
+- `kv/write_batches.rs` — `KVWriteBatch` enum + `WriteBatches`
+- `kv/keyspaces.rs` — `KeyspaceSet` trait, `Keyspaces`, `KeyspaceId`
+- `kv/rocks/mod.rs` — `RocksKVStore` (extracted from `storage/keyspace/`)
+- `kv/rocks/iterator.rs` — `RocksRangeIterator` (extracted)
+- `kv/rocks/iterpool.rs` — Raw iterator pool (RocksDB-specific)
+- `kv/rocks/pool.rs` — Connection pool
 
-**Modified files:**
-- `storage/storage.rs` — `MVCCStorage` becomes generic over `B: StorageBackend`
-- `storage/snapshot/*.rs` — snapshot types carry `B` generic
-- `storage/iterator.rs` — `MVCCRangeIterator` wraps `B::Iterator` instead of `DBRawIterator`
-- `encoding/encoding.rs` — remove `rocks_configuration()`, keep `KeyspaceDescriptor`
-- `encoding/Cargo.toml` — remove `rocksdb` dependency
-- `database/database.rs` — instantiate with `RocksDbBackend`
-- `database/transaction.rs` — carry `B` generic
+**Deleted files:**
+- `storage/keyspace/keyspace.rs` (420 lines)
+- `storage/keyspace/raw_iterator.rs` (158 lines)
+- `storage/keyspace/mod.rs` (47 lines)
+- `storage/keyspace/constants.rs` (12 lines)
+- `storage/write_batches.rs` (83 lines)
 
-**Unchanged:** All consumer code (executor, concept, compiler, query, server, function)
+**Moved files:**
+- `storage/key_range.rs` → `common/primitive/key_range.rs`
 
-## Files that change for Value Type Extensibility
+**Modified files (73 total):**
+- `storage/storage.rs` — uses `kv::Keyspaces` instead of internal keyspaces
+- `storage/snapshot/snapshot.rs` — no longer generic over KV backend
+- `storage/iterator.rs` — wraps `KVRangeIterator` instead of raw iterator
+- `encoding/encoding.rs` — `EncodingKeyspace` implements `kv::KeyspaceSet`
+- `database/database.rs` — opens via `KVStore::open_keyspaces()`
+- Plus 60+ files across concept, compiler, function, ir, server for generic removal
+
+**Unchanged:** All consumer code APIs (executor, concept, compiler, query, server)
+
+## Files that Change for Value Type Extensibility
 
 **New files:**
 - `encoding/value/type_descriptor.rs` — trait + registry
