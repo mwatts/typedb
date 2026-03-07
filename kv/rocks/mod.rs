@@ -18,12 +18,12 @@ use error::{typedb_error, TypeDBError};
 use primitive::key_range::KeyRange;
 use resource::{constants::storage::ROCKSDB_CACHE_SIZE_MB, profile::StorageCounters};
 use rocksdb::{
-    checkpoint::Checkpoint, BlockBasedIndexType, BlockBasedOptions, Cache, DBCompressionType, IteratorMode, Options,
-    ReadOptions, SliceTransform, WriteBatch, WriteOptions, DB,
+    checkpoint::Checkpoint, BlockBasedIndexType, BlockBasedOptions, Cache, DBCompressionType, Options, ReadOptions,
+    SliceTransform, WriteBatch, WriteOptions, DB,
 };
 
 use crate::{
-    keyspaces::{KeyspaceId, KeyspaceSet, Keyspaces, KeyspacesError},
+    keyspaces::{KeyspaceSet, Keyspaces, KeyspacesError},
     rocks::iterator::RocksRangeIterator,
     KVStore, KVStoreID,
 };
@@ -230,12 +230,16 @@ impl RocksKVStore {
     }
 
     pub fn reset(&mut self) -> Result<(), Box<dyn TypeDBError>> {
-        let iterator = self.rocks.iterator(IteratorMode::Start);
-        for entry in iterator {
-            let (key, _) = entry.map_err(|err| RocksKVError::Iterate { name: self.name, source: err })?;
-            self.rocks.delete(key).map_err(|err| RocksKVError::Iterate { name: self.name, source: err })?;
-        }
-        Ok(())
+        // Use a single atomic WriteBatch with delete_range to clear all keys rather
+        // than iterating and deleting one-by-one. The O(n) loop is non-atomic: a
+        // crash or error part-way through leaves the store in a partially-cleared
+        // state. delete_range([],  [0xFF×256]) covers every possible key (TypeDB
+        // MVCC keys are at most ~100 bytes) and is applied in one RocksDB write.
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.delete_range(b"".as_ref(), [0xFFu8; 256].as_ref());
+        self.rocks
+            .write_opt(batch, &self.write_options)
+            .map_err(|err| RocksKVError::Reset { name: self.name, source: err }.into())
     }
 
     pub fn estimate_size_in_bytes(&self) -> Result<u64, Box<dyn TypeDBError>> {
@@ -264,6 +268,7 @@ typedb_error! {
         Iterate(5, "RocksDB error iterating kv store {name}.", name: &'static str, source: rocksdb::Error),
         DeleteRange(6, "RocksDB error deleting range in kv store {name}.", name: &'static str, source: rocksdb::Error),
         PropertyRead(7, "RocksDB error reading property in kv store {name}.", name: &'static str, source: rocksdb::Error),
+        Reset(8, "RocksDB error resetting kv store {name}.", name: &'static str, source: rocksdb::Error),
 
         CheckpointExists(20, "Cannot create checkpoint for kv store {name} - path {dir} exists.", name: &'static str, dir: String),
         CreateRocksDBCheckpoint(21, "RocksDB error creating checkpoint for kv store {name}.", name: &'static str, source: rocksdb::Error),
