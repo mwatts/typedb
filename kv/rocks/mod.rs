@@ -6,6 +6,8 @@
 pub(crate) mod iterator;
 mod iterpool;
 pub mod pool;
+#[cfg(test)]
+mod tests;
 
 use std::{
     fs, io,
