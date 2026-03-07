@@ -84,6 +84,17 @@ impl Keyspaces {
     }
 
     pub fn get(&self, keyspace_id: KeyspaceId) -> &KVStore {
+        debug_assert!(
+            (keyspace_id.0 as usize) < KEYSPACE_MAXIMUM_COUNT,
+            "keyspace_id {} out of bounds (max {})",
+            keyspace_id.0,
+            KEYSPACE_MAXIMUM_COUNT - 1
+        );
+        debug_assert!(
+            self.index[keyspace_id.0 as usize].is_some(),
+            "keyspace_id {} has not been registered",
+            keyspace_id.0
+        );
         let keyspace_index = self.index[keyspace_id.0 as usize].unwrap();
         &self.keyspaces[keyspace_index.0 as usize]
     }
