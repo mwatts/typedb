@@ -171,3 +171,141 @@ pub mod diagnostics {
 
     pub const DISABLED_REPORTING_FILE_NAME: &str = "_reporting_disabled";
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Time constants ---
+
+    #[test]
+    fn time_constants_are_consistent() {
+        assert_eq!(common::SECONDS_IN_HOUR, 60 * 60);
+        assert_eq!(common::SECONDS_IN_DAY, 60 * 60 * 24);
+        assert_eq!(common::SECONDS_IN_MONTH, 60 * 60 * 24 * 30);
+        assert_eq!(common::SECONDS_IN_YEAR, 60 * 60 * 24 * 365);
+    }
+
+    // --- Authentication constants ---
+
+    #[test]
+    fn auth_token_expiration_order() {
+        assert!(server::MIN_AUTHENTICATION_TOKEN_EXPIRATION < server::DEFAULT_AUTHENTICATION_TOKEN_EXPIRATION);
+        assert!(server::DEFAULT_AUTHENTICATION_TOKEN_EXPIRATION < server::MAX_AUTHENTICATION_TOKEN_EXPIRATION);
+    }
+
+    #[test]
+    fn min_auth_expiration_is_one_second() {
+        assert_eq!(server::MIN_AUTHENTICATION_TOKEN_EXPIRATION_SECONDS, 1);
+    }
+
+    #[test]
+    fn max_auth_expiration_is_one_year() {
+        assert_eq!(
+            server::MAX_AUTHENTICATION_TOKEN_EXPIRATION_SECONDS,
+            common::SECONDS_IN_YEAR
+        );
+    }
+
+    #[test]
+    fn default_auth_expiration_is_four_hours() {
+        assert_eq!(
+            server::DEFAULT_AUTHENTICATION_TOKEN_EXPIRATION_SECONDS,
+            4 * common::SECONDS_IN_HOUR
+        );
+    }
+
+    // --- Default user ---
+
+    #[test]
+    fn default_user_name() {
+        assert_eq!(server::DEFAULT_USER_NAME, "admin");
+    }
+
+    #[test]
+    fn default_user_password() {
+        assert_eq!(server::DEFAULT_USER_PASSWORD, "password");
+    }
+
+    // --- Server ID ---
+
+    #[test]
+    fn server_id_length_is_16() {
+        assert_eq!(server::SERVER_ID_LENGTH, 16);
+    }
+
+    #[test]
+    fn server_id_alphabet_has_36_chars() {
+        assert_eq!(server::SERVER_ID_ALPHABET.len(), 36);
+        // Should be uppercase A-Z + digits 0-9
+        for c in &server::SERVER_ID_ALPHABET {
+            assert!(c.is_ascii_uppercase() || c.is_ascii_digit());
+        }
+    }
+
+    // --- Database constants ---
+
+    #[test]
+    fn internal_database_prefix() {
+        assert_eq!(database::INTERNAL_DATABASE_PREFIX, "_");
+    }
+
+    #[test]
+    fn query_plan_cache_size_positive() {
+        assert!(database::QUERY_PLAN_CACHE_SIZE > 0);
+    }
+
+    // --- Traversal constants ---
+
+    #[test]
+    fn traversal_constants_positive() {
+        assert!(traversal::CONSTANT_CONCEPT_LIMIT > 0);
+        assert!(traversal::FIXED_BATCH_ROWS_MAX > 0);
+        assert!(traversal::BATCH_DEFAULT_CAPACITY > 0);
+        assert!(traversal::CHECK_INTERRUPT_FREQUENCY_ROWS > 0);
+    }
+
+    // --- Snapshot constants ---
+
+    #[test]
+    fn buffer_sizes_positive() {
+        assert!(snapshot::BUFFER_KEY_INLINE > 0);
+        assert!(snapshot::BUFFER_VALUE_INLINE > 0);
+    }
+
+    // --- Monitoring ---
+
+    #[test]
+    fn monitoring_default_port() {
+        assert_eq!(server::MONITORING_DEFAULT_PORT, 4104);
+    }
+
+    // --- Transaction defaults ---
+
+    #[test]
+    fn default_prefetch_size() {
+        assert_eq!(server::DEFAULT_PREFETCH_SIZE, 32);
+    }
+
+    #[test]
+    fn default_transaction_timeout_is_five_minutes() {
+        assert_eq!(
+            server::DEFAULT_TRANSACTION_TIMEOUT_MILLIS,
+            5 * common::SECONDS_IN_MINUTE * 1000
+        );
+    }
+
+    // --- Diagnostics ---
+
+    #[test]
+    fn report_interval_is_one_hour() {
+        assert_eq!(diagnostics::REPORT_INTERVAL.as_secs(), common::SECONDS_IN_HOUR);
+    }
+
+    #[test]
+    fn retry_config_valid() {
+        assert!(diagnostics::REPORT_MAX_RETRY_NUM > 0);
+        assert!(diagnostics::REPORT_RETRY_DELAY_EXPONENTIAL_MULTIPLIER >= 2);
+        assert!(diagnostics::REPORT_INITIAL_RETRY_DELAY.as_millis() > 0);
+    }
+}

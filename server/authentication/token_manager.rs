@@ -146,3 +146,184 @@ typedb_error! {
         InvlaidTokensExpirationTime(1, "Invalid tokens expiration time '{value}'. It must be between '{min}' and '{max}' seconds.", value: u64, min: u64, max: u64),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use resource::constants::server::{MAX_AUTHENTICATION_TOKEN_EXPIRATION, MIN_AUTHENTICATION_TOKEN_EXPIRATION};
+
+    use super::*;
+
+    fn valid_expiration() -> Duration {
+        Duration::from_secs(60)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn create_token_manager_with_valid_expiration() {
+        let tm = TokenManager::new(valid_expiration());
+        assert!(tm.is_ok());
+    }
+
+    #[test]
+    fn reject_expiration_below_minimum() {
+        let too_short = MIN_AUTHENTICATION_TOKEN_EXPIRATION - Duration::from_secs(1);
+        let result = TokenManager::new(too_short);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reject_expiration_above_maximum() {
+        let too_long = MAX_AUTHENTICATION_TOKEN_EXPIRATION + Duration::from_secs(1);
+        let result = TokenManager::new(too_long);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_minimum_expiration() {
+        let result = TokenManager::new(MIN_AUTHENTICATION_TOKEN_EXPIRATION);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_maximum_expiration() {
+        let result = TokenManager::new(MAX_AUTHENTICATION_TOKEN_EXPIRATION);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn new_token_is_valid() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let token = tm.new_token("alice".to_string()).await;
+        assert!(!token.is_empty());
+        let owner = tm.get_valid_token_owner(&token).await;
+        assert_eq!(owner, Some("alice".to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn multiple_tokens_for_same_user() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let token1 = tm.new_token("alice".to_string()).await;
+        // Sleep to ensure different iat timestamp (JWT tokens with identical claims are deterministic)
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let token2 = tm.new_token("alice".to_string()).await;
+        assert_ne!(token1, token2);
+        assert_eq!(tm.get_valid_token_owner(&token1).await, Some("alice".to_string()));
+        assert_eq!(tm.get_valid_token_owner(&token2).await, Some("alice".to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tokens_for_different_users() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let token_alice = tm.new_token("alice".to_string()).await;
+        let token_bob = tm.new_token("bob".to_string()).await;
+        assert_eq!(tm.get_valid_token_owner(&token_alice).await, Some("alice".to_string()));
+        assert_eq!(tm.get_valid_token_owner(&token_bob).await, Some("bob".to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn invalid_token_returns_none() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let owner = tm.get_valid_token_owner("invalid-token").await;
+        assert_eq!(owner, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn empty_token_returns_none() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let owner = tm.get_valid_token_owner("").await;
+        assert_eq!(owner, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn invalidate_user_revokes_all_tokens() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let token1 = tm.new_token("alice".to_string()).await;
+        let token2 = tm.new_token("alice".to_string()).await;
+        let token_bob = tm.new_token("bob".to_string()).await;
+
+        tm.invalidate_user("alice").await;
+
+        assert_eq!(tm.get_valid_token_owner(&token1).await, None);
+        assert_eq!(tm.get_valid_token_owner(&token2).await, None);
+        // Bob's token should still be valid
+        assert_eq!(tm.get_valid_token_owner(&token_bob).await, Some("bob".to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn invalidate_nonexistent_user_is_noop() {
+        let tm = TokenManager::new(valid_expiration()).unwrap();
+        let token = tm.new_token("alice".to_string()).await;
+        tm.invalidate_user("nonexistent").await;
+        assert_eq!(tm.get_valid_token_owner(&token).await, Some("alice".to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn token_from_different_manager_is_invalid() {
+        let tm1 = TokenManager::new(valid_expiration()).unwrap();
+        let tm2 = TokenManager::new(valid_expiration()).unwrap();
+        let token = tm1.new_token("alice".to_string()).await;
+        // Different manager has different secret key and no record of this token
+        assert_eq!(tm2.get_valid_token_owner(&token).await, None);
+    }
+
+    #[test]
+    fn random_key_is_128_chars() {
+        let key = TokenManager::random_key();
+        assert_eq!(key.len(), 128);
+        assert!(key.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn random_keys_are_unique() {
+        let key1 = TokenManager::random_key();
+        let key2 = TokenManager::random_key();
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        let secret = b"test-secret-key";
+        let claims = Claims { sub: "alice".to_string(), exp: u64::MAX, iat: 0 };
+        let token = TokenManager::encode_token(secret, claims.clone());
+        let decoded = TokenManager::decode_token(secret, &token);
+        assert!(decoded.is_some());
+        let decoded = decoded.unwrap();
+        assert_eq!(decoded.sub, "alice");
+    }
+
+    #[test]
+    fn decode_with_wrong_key_fails() {
+        let claims = Claims { sub: "alice".to_string(), exp: u64::MAX, iat: 0 };
+        let token = TokenManager::encode_token(b"key1", claims);
+        let decoded = TokenManager::decode_token(b"key2", &token);
+        assert!(decoded.is_none());
+    }
+
+    #[test]
+    fn decode_expired_token_fails() {
+        let claims = Claims { sub: "alice".to_string(), exp: 0, iat: 0 };
+        let token = TokenManager::encode_token(b"key", claims);
+        let decoded = TokenManager::decode_token(b"key", &token);
+        // jsonwebtoken library validates expiration during decode
+        assert!(decoded.is_none());
+    }
+
+    #[test]
+    fn is_expired_past_time() {
+        assert!(TokenManager::is_expired(0));
+    }
+
+    #[test]
+    fn is_expired_future_time() {
+        assert!(!TokenManager::is_expired(u64::MAX));
+    }
+
+    #[test]
+    fn token_manager_error_display() {
+        let err = TokenManagerError::InvlaidTokensExpirationTime { value: 0, min: 1, max: 100 };
+        let msg = error::TypeDBError::format_description(&err);
+        assert!(msg.contains("Invalid tokens expiration time"));
+        assert!(msg.contains("0"));
+    }
+}

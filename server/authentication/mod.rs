@@ -81,3 +81,119 @@ typedb_error! {
         CorruptedAccessor(4, "Could not identify the mandatory request's accessor. This might be an authentication bug."),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tonic::metadata::MetadataMap;
+
+    use super::*;
+
+    #[test]
+    fn extract_metadata_token_valid_bearer() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("authorization", "Bearer my-token-123".parse().unwrap());
+        let token = extract_metadata_authorization_token(&metadata);
+        assert_eq!(token, Some("my-token-123".to_string()));
+    }
+
+    #[test]
+    fn extract_metadata_token_missing_header() {
+        let metadata = MetadataMap::new();
+        let token = extract_metadata_authorization_token(&metadata);
+        assert_eq!(token, None);
+    }
+
+    #[test]
+    fn extract_metadata_token_no_bearer_prefix() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("authorization", "Basic abc123".parse().unwrap());
+        let token = extract_metadata_authorization_token(&metadata);
+        assert_eq!(token, None);
+    }
+
+    #[test]
+    fn extract_metadata_token_empty_bearer() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("authorization", "Bearer ".parse().unwrap());
+        let token = extract_metadata_authorization_token(&metadata);
+        assert_eq!(token, Some("".to_string()));
+    }
+
+    #[test]
+    fn extract_metadata_accessor_valid() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("authorization", "Bearer token-value".parse().unwrap());
+        let token = extract_metadata_accessor(&metadata);
+        assert_eq!(token, Some("token-value".to_string()));
+    }
+
+    #[test]
+    fn extract_metadata_accessor_missing() {
+        let metadata = MetadataMap::new();
+        let token = extract_metadata_accessor(&metadata);
+        assert_eq!(token, None);
+    }
+
+    #[test]
+    fn accessor_from_extensions_present() {
+        let mut extensions = Extensions::new();
+        extensions.insert(Accessor("admin".to_string()));
+        let accessor = Accessor::from_extensions(&extensions);
+        assert!(accessor.is_ok());
+        assert_eq!(accessor.unwrap().0, "admin");
+    }
+
+    #[test]
+    fn accessor_from_extensions_missing() {
+        let extensions = Extensions::new();
+        let accessor = Accessor::from_extensions(&extensions);
+        assert!(accessor.is_err());
+    }
+
+    #[test]
+    fn accessor_equality() {
+        let a = Accessor("admin".to_string());
+        let b = Accessor("admin".to_string());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn accessor_inequality() {
+        let a = Accessor("admin".to_string());
+        let b = Accessor("user".to_string());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn accessor_ordering() {
+        let a = Accessor("admin".to_string());
+        let b = Accessor("user".to_string());
+        assert!(a < b);
+    }
+
+    #[test]
+    fn accessor_clone() {
+        let a = Accessor("admin".to_string());
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn http_constants() {
+        assert_eq!(HTTP_AUTHORIZATION_FIELD, "authorization");
+        assert_eq!(HTTP_BEARER_PREFIX, "Bearer ");
+    }
+
+    #[test]
+    fn authentication_error_codes() {
+        use error::TypeDBError;
+        let err = AuthenticationError::InvalidCredential {};
+        assert_eq!(err.code(), "AUT1");
+        let err = AuthenticationError::MissingToken {};
+        assert_eq!(err.code(), "AUT2");
+        let err = AuthenticationError::InvalidToken {};
+        assert_eq!(err.code(), "AUT3");
+        let err = AuthenticationError::CorruptedAccessor {};
+        assert_eq!(err.code(), "AUT4");
+    }
+}
