@@ -1,0 +1,28 @@
+[package]
+name = "thyra-spike"
+edition = "2021"
+version = "0.0.0"
+publish = false
+
+[[bin]]
+name = "thyra-spike"
+path = "src/main.rs"
+
+[dependencies]
+database = { path = "../database" }
+storage = { path = "../storage" }
+executor = { path = "../executor" }
+query = { path = "../query" }
+concept = { path = "../concept" }
+encoding = { path = "../encoding" }
+function = { path = "../function" }
+ir = { path = "../ir" }
+compiler = { path = "../compiler" }
+options = { path = "../common/options" }
+logger = { path = "../common/logger" }
+answer = { path = "../answer" }
+resource = { path = "../resource" }
+lending_iterator = { path = "../common/lending_iterator" }
+test_utils = { path = "../util/test" }
+typeql = { git = "https://github.com/typedb/typeql", tag = "3.8.0", default-features = false }
+itertools = { version = "0.10.5", default-features = false, features = ["use_std"] }

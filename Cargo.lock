@@ -5046,6 +5046,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "thyra-spike"
+version = "0.0.0"
+dependencies = [
+ "answer",
+ "compiler",
+ "concept",
+ "database",
+ "encoding",
+ "executor",
+ "function",
+ "ir",
+ "itertools 0.10.5",
+ "lending_iterator",
+ "logger",
+ "options",
+ "query",
+ "resource",
+ "storage",
+ "test_utils",
+ "typeql",
+]
+
+[[package]]
 name = "time"
 version = "0.3.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
