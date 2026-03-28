@@ -2655,10 +2655,12 @@ dependencies = [
  "lending_iterator",
  "logger",
  "primitive",
+ "redb",
  "resource",
  "rocksdb",
  "serde",
  "structural_equality",
+ "tempfile",
  "tracing",
  "typeql",
 ]
@@ -3610,7 +3612,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.23",
- "socket2 0.5.8",
+ "socket2 0.6.0",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -3647,9 +3649,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.8",
+ "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3785,6 +3787,15 @@ dependencies = [
  "bincode",
  "durability",
  "durability_test_common",
+]
+
+[[package]]
+name = "redb"
+version = "2.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eca1e9d98d5a7e9002d0013e18d5a9b000aee942eb134883a82f06ebffb6c01"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

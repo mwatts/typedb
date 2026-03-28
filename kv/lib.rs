@@ -6,6 +6,8 @@
 pub mod iterator;
 pub mod keyspaces;
 pub mod memory;
+#[cfg(feature = "redb")]
+pub mod redb;
 pub mod rocks;
 pub mod write_batches;
 
@@ -22,11 +24,15 @@ use crate::{
     memory::InMemoryKVStore,
     rocks::RocksKVStore,
 };
+#[cfg(feature = "redb")]
+use crate::redb::RedbKVStore;
 
 #[derive(Debug)]
 pub enum KVStore {
     RocksDB(RocksKVStore),
     InMemory(InMemoryKVStore),
+    #[cfg(feature = "redb")]
+    Redb(RedbKVStore),
 }
 
 /// Selects which storage backend is used when opening a set of keyspaces.
@@ -42,6 +48,10 @@ pub enum KVBackend {
     /// Ephemeral in-memory storage backed by a `BTreeMap`. Suitable for tests
     /// and environments where persistence is not available (e.g. WASM).
     InMemory,
+    /// Persistent redb-backed storage. A lightweight embedded database suitable
+    /// for environments where RocksDB is not available (e.g. iOS/macOS).
+    #[cfg(feature = "redb")]
+    Redb,
 }
 
 impl KVBackend {
@@ -53,6 +63,8 @@ impl KVBackend {
         match self {
             Self::RocksDB => RocksKVStore::open_keyspaces::<KS>(storage_dir),
             Self::InMemory => InMemoryKVStore::open_keyspaces::<KS>(storage_dir),
+            #[cfg(feature = "redb")]
+            Self::Redb => RedbKVStore::open_keyspaces::<KS>(storage_dir),
         }
     }
 }
@@ -62,6 +74,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.id(),
             Self::InMemory(s) => s.id(),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.id(),
         }
     }
 
@@ -69,6 +83,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.name(),
             Self::InMemory(s) => s.name(),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.name(),
         }
     }
 
@@ -76,6 +92,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.put(key, value),
             Self::InMemory(s) => s.put(key, value),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.put(key, value),
         }
     }
 
@@ -86,6 +104,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.get(key, mapper),
             Self::InMemory(s) => s.get(key, mapper),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.get(key, mapper),
         }
     }
 
@@ -96,6 +116,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.get_prev(key, mapper),
             Self::InMemory(s) => s.get_prev(key, mapper),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.get_prev(key, mapper),
         }
     }
 
@@ -107,6 +129,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => KVRangeIterator::RocksDB(s.iterate_range(range, storage_counters)),
             Self::InMemory(s) => KVRangeIterator::InMemory(s.iterate_range(range, storage_counters)),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => KVRangeIterator::Redb(s.iterate_range(range, storage_counters)),
         }
     }
 
@@ -127,6 +151,12 @@ impl KVStore {
             (Self::InMemory(_), KVWriteBatch::RocksDB(_)) => {
                 unreachable!("cannot write RocksDB WriteBatch to InMemory store")
             }
+            #[cfg(feature = "redb")]
+            (Self::Redb(s), KVWriteBatch::Buffered(b)) => s.write(b),
+            #[cfg(feature = "redb")]
+            (Self::Redb(_), KVWriteBatch::RocksDB(_)) => {
+                unreachable!("cannot write RocksDB WriteBatch to Redb store")
+            }
         }
     }
 
@@ -134,6 +164,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.checkpoint(checkpoint_dir),
             Self::InMemory(s) => s.checkpoint(checkpoint_dir),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.checkpoint(checkpoint_dir),
         }
     }
 
@@ -141,6 +173,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.delete(),
             Self::InMemory(s) => s.delete(),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.delete(),
         }
     }
 
@@ -148,6 +182,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.reset(),
             Self::InMemory(s) => s.reset(),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.reset(),
         }
     }
 
@@ -155,6 +191,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.estimate_size_in_bytes(),
             Self::InMemory(s) => s.estimate_size_in_bytes(),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.estimate_size_in_bytes(),
         }
     }
 
@@ -162,6 +200,8 @@ impl KVStore {
         match self {
             Self::RocksDB(s) => s.estimate_key_count(),
             Self::InMemory(s) => s.estimate_key_count(),
+            #[cfg(feature = "redb")]
+            Self::Redb(s) => s.estimate_key_count(),
         }
     }
 }
