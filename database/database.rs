@@ -24,6 +24,7 @@ use concept::{
     },
 };
 use concurrency::IntervalRunner;
+#[cfg(feature = "diagnostics")]
 use diagnostics::metrics::{DataLoadMetrics, DatabaseMetrics, SchemaLoadMetrics};
 use durability::{
     wal::{WALError, WAL},
@@ -504,6 +505,7 @@ impl Database<WALClient> {
         Ok(())
     }
 
+    #[cfg(feature = "diagnostics")]
     pub fn get_metrics(&self) -> DatabaseMetrics {
         let schema = self.schema.read().expect("Expected database schema lock acquisition");
         DatabaseMetrics {

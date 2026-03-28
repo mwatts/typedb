@@ -124,7 +124,7 @@ dev-dependencies = {}
 
 	[dependencies.database]
 		path = "../database"
-		features = ["rocks"]
+		features = ["rocks", "diagnostics"]
 		default-features = false
 
 	[dependencies.chrono-tz]

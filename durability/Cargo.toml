@@ -43,8 +43,10 @@ features = {}
 	[dependencies.logger]
 		workspace = true
 
-	[dependencies.lz4]
-		workspace = true
+	[dependencies.lz4_flex]
+		features = ["frame"]
+		version = "0.11.3"
+		default-features = false
 
 	[dependencies.fail_point]
 		workspace = true

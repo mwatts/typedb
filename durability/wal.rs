@@ -286,11 +286,9 @@ impl Files {
         }
 
         let mut compressed_bytes = Vec::new();
-        let mut encoder = lz4::EncoderBuilder::new()
-            .build(&mut compressed_bytes)
-            .map_err(|err| WALError::Compression { source: Arc::new(err) })?;
+        let mut encoder = lz4_flex::frame::FrameEncoder::new(&mut compressed_bytes);
         encoder.write_all(&record.bytes).map_err(|err| WALError::Compression { source: Arc::new(err) })?;
-        encoder.finish().1.map_err(|err| WALError::Compression { source: Arc::new(err) })?;
+        encoder.finish().map_err(|err| WALError::Compression { source: Arc::new(err.into()) })?;
 
         let writer = self.writer.as_mut().unwrap();
         write_header(
@@ -436,8 +434,8 @@ impl FileReader {
         let RecordHeader { sequence_number, len, record_type } = self.read_header()?;
 
         let mut decompressed_bytes = Vec::new();
-        lz4::Decoder::new((&mut self.reader).take(len))
-            .and_then(|mut decoder| decoder.read_to_end(&mut decompressed_bytes))
+        lz4_flex::frame::FrameDecoder::new((&mut self.reader).take(len))
+            .read_to_end(&mut decompressed_bytes)
             .map_err(|err| WALError::Decompression { source: Arc::new(err) })?;
 
         Ok(Some(RawRecord { sequence_number, record_type, bytes: Cow::Owned(decompressed_bytes) }))

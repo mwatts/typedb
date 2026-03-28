@@ -3,9 +3,10 @@
 # Do not modify this file.
 
 [features]
-default = ["rocks"]
-rocks = ["kv/rocks", "storage/rocks"]
+default = ["rocks", "diagnostics"]
+rocks = ["kv/rocks", "storage/rocks", "cache/rocks"]
 redb = ["kv/redb", "storage/redb"]
+diagnostics = ["dep:diagnostics"]
 
 [package]
 	name = "database"
@@ -68,7 +69,10 @@ redb = ["kv/redb", "storage/redb"]
 		workspace = true
 
 	[dependencies.diagnostics]
-		workspace = true
+		path = "../diagnostics"
+		features = []
+		default-features = false
+		optional = true
 
 	[dependencies.executor]
 		workspace = true
