@@ -5,6 +5,7 @@
 [features]
 default = ["rocks"]
 rocks = ["dep:rocksdb"]
+redb = ["dep:redb"]
 
 [package]
 	name = "cache"
@@ -38,6 +39,11 @@ rocks = ["dep:rocksdb"]
 		version = "0.23.0"
 		default-features = false
 		optional = true
+
+	[dependencies.redb]
+		version = "2"
+		optional = true
+		default-features = false
 
 	[dependencies.uuid]
 		workspace = true

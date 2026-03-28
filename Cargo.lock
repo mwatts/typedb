@@ -708,6 +708,7 @@ name = "cache"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "redb",
  "resource",
  "rocksdb",
  "serde",
