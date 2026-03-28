@@ -5,7 +5,7 @@
 [features]
 default = ["rocks", "diagnostics"]
 rocks = ["kv/rocks", "storage/rocks", "cache/rocks"]
-redb = ["kv/redb", "storage/redb"]
+redb = ["kv/redb", "storage/redb", "cache/redb"]
 diagnostics = ["dep:diagnostics"]
 
 [package]
