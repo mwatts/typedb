@@ -1,0 +1,10 @@
+[package]
+name = "fulltext"
+edition = "2021"
+version = "0.0.0"
+
+[dependencies]
+tantivy = "0.25"
+
+[dev-dependencies]
+tempfile = "3"
