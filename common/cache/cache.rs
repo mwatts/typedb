@@ -19,12 +19,16 @@ pub const CACHE_DB_NAME_PREFIX: &str = concat!(internal_database_prefix!(), "cac
 pub struct SpilloverCache<T: Serialize + DeserializeOwned + Clone> {
     memory_storage: HashMap<String, T>,
     disk_storage_path: PathBuf,
+    #[cfg(feature = "rocks")]
     disk_storage: Option<rocksdb::DB>,
+    #[cfg(not(feature = "rocks"))]
+    disk_storage: Option<()>,
     memory_size_limit: usize,
 }
 
 impl<T: Serialize + DeserializeOwned + Clone> SpilloverCache<T> {
     pub fn new(disk_storage_dir: &PathBuf, name_prefix: Option<&str>, memory_size_limit: usize) -> Self {
+        #[cfg(feature = "rocks")]
         assert!(disk_storage_dir.is_dir(), "SpilloverCache requires a disk storage path to a directory!");
         let unique_db_name = Uuid::new_v4().to_string();
         let disk_storage_path =
@@ -58,6 +62,7 @@ impl<T: Serialize + DeserializeOwned + Clone> SpilloverCache<T> {
         }
     }
 
+    #[cfg(feature = "rocks")]
     fn disk_storage_insert(&mut self, key: String, value: T) -> Result<(), CacheError> {
         if self.disk_storage.is_none() {
             let rocks_db = rocksdb::DB::open(&Self::rocks_configuration(), &self.disk_storage_path)
@@ -72,6 +77,14 @@ impl<T: Serialize + DeserializeOwned + Clone> SpilloverCache<T> {
             .map_err(|source| CacheError::DiskStorageAccess { source })
     }
 
+    #[cfg(not(feature = "rocks"))]
+    fn disk_storage_insert(&mut self, key: String, value: T) -> Result<(), CacheError> {
+        // No disk backend available -- store in memory regardless of limit
+        self.memory_storage.insert(key, value);
+        Ok(())
+    }
+
+    #[cfg(feature = "rocks")]
     fn disk_storage_get(&self, key: &str) -> Result<Option<T>, CacheError> {
         if let Some(disk_storage) = &self.disk_storage {
             if let Some(bytes) = disk_storage.get(key).map_err(|source| CacheError::DiskStorageAccess { source })? {
@@ -83,6 +96,12 @@ impl<T: Serialize + DeserializeOwned + Clone> SpilloverCache<T> {
         Ok(None)
     }
 
+    #[cfg(not(feature = "rocks"))]
+    fn disk_storage_get(&self, _key: &str) -> Result<Option<T>, CacheError> {
+        Ok(None)
+    }
+
+    #[cfg(feature = "rocks")]
     fn disk_storage_remove(&mut self, key: &str) -> Result<(), CacheError> {
         match &mut self.disk_storage {
             Some(disk_storage) => disk_storage.delete(key).map_err(|source| CacheError::DiskStorageAccess { source }),
@@ -90,6 +109,12 @@ impl<T: Serialize + DeserializeOwned + Clone> SpilloverCache<T> {
         }
     }
 
+    #[cfg(not(feature = "rocks"))]
+    fn disk_storage_remove(&mut self, _key: &str) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    #[cfg(feature = "rocks")]
     fn rocks_configuration() -> rocksdb::Options {
         let mut options = rocksdb::Options::default();
         options.create_if_missing(true);
@@ -99,17 +124,23 @@ impl<T: Serialize + DeserializeOwned + Clone> SpilloverCache<T> {
 
 impl<T: Serialize + DeserializeOwned + Clone> Drop for SpilloverCache<T> {
     fn drop(&mut self) {
-        drop(std::mem::take(&mut self.disk_storage)); // release its files
-        if let Err(e) = std::fs::remove_dir_all(&self.disk_storage_path) {
-            // Can be cleaned up by the cache's user
-            event!(Level::TRACE, "Failed to delete a temporary DB directory {:?}: {e}", self.disk_storage_path);
+        #[cfg(feature = "rocks")]
+        {
+            drop(std::mem::take(&mut self.disk_storage)); // release its files
+            if let Err(e) = std::fs::remove_dir_all(&self.disk_storage_path) {
+                // Can be cleaned up by the cache's user
+                event!(Level::TRACE, "Failed to delete a temporary DB directory {:?}: {e}", self.disk_storage_path);
+            }
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum CacheError {
+    #[cfg(feature = "rocks")]
     DiskStorageAccess { source: rocksdb::Error },
+    #[cfg(not(feature = "rocks"))]
+    DiskStorageAccess { source: String },
     DiskStorageSerialization,
     DiskStorageDeserialization,
 }
@@ -127,12 +158,18 @@ impl fmt::Display for CacheError {
 }
 
 impl Error for CacheError {
+    #[cfg(feature = "rocks")]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             CacheError::DiskStorageAccess { source } => Some(source),
             CacheError::DiskStorageSerialization => None,
             CacheError::DiskStorageDeserialization => None,
         }
+    }
+
+    #[cfg(not(feature = "rocks"))]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
     }
 }
 

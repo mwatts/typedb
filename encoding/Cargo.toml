@@ -76,9 +76,6 @@ features = {}
 	[dependencies.bincode]
 		workspace = true
 
-	[dependencies.rocksdb]
-		workspace = true
-
 	[dependencies.typeql]
 		workspace = true
 
