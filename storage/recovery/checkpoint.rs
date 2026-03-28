@@ -153,6 +153,9 @@ impl CheckpointReader {
                 .map_err(|error| CheckpointRestore { dir: self.directory.clone(), source: Arc::new(error) })?;
         }
 
+        // TODO(thyra): Make backend configurable for checkpoint recovery.
+        // For now, default to RocksDB. When the database stores its backend
+        // preference, checkpoint recovery should respect it.
         let keyspaces = KVBackend::RocksDB
             .open_keyspaces::<KS>(keyspaces_dir)
             .map_err(|error| KeyspacesOpen { typedb_source: error })?;

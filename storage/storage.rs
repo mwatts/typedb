@@ -81,7 +81,19 @@ impl<Durability> MVCCStorage<Durability> {
     pub fn create<KS: KeyspaceSet>(
         name: impl AsRef<str>,
         path: &Path,
+        durability_client: Durability,
+    ) -> Result<Self, StorageOpenError>
+    where
+        Durability: DurabilityClient,
+    {
+        Self::create_with_backend::<KS>(name, path, durability_client, KVBackend::RocksDB)
+    }
+
+    pub fn create_with_backend<KS: KeyspaceSet>(
+        name: impl AsRef<str>,
+        path: &Path,
         mut durability_client: Durability,
+        backend: KVBackend,
     ) -> Result<Self, StorageOpenError>
     where
         Durability: DurabilityClient,
@@ -97,7 +109,7 @@ impl<Durability> MVCCStorage<Durability> {
         })?;
         fail_point!(STORAGE_EMPTY_STORAGE_DIR);
         Self::register_durability_record_types(&mut durability_client);
-        let keyspaces = Self::create_keyspaces::<KS>(name.as_ref(), &storage_dir)?;
+        let keyspaces = Self::create_keyspaces::<KS>(name.as_ref(), &storage_dir, backend)?;
 
         let isolation_manager = IsolationManager::new(durability_client.current());
         Ok(Self {
@@ -112,8 +124,9 @@ impl<Durability> MVCCStorage<Durability> {
     fn create_keyspaces<KS: KeyspaceSet>(
         name: impl AsRef<str>,
         storage_dir: &Path,
+        backend: KVBackend,
     ) -> Result<Keyspaces, StorageOpenError> {
-        let keyspaces = KVBackend::RocksDB
+        let keyspaces = backend
             .open_keyspaces::<KS>(storage_dir)
             .map_err(|err| StorageOpenError::KeyspaceOpen { name: name.as_ref().to_owned(), typedb_source: err })?;
         Ok(keyspaces)
@@ -122,8 +135,21 @@ impl<Durability> MVCCStorage<Durability> {
     pub fn load<KS: KeyspaceSet>(
         name: impl AsRef<str>,
         path: &Path,
+        durability_client: Durability,
+        checkpoint: &Option<Checkpoint>,
+    ) -> Result<Self, StorageOpenError>
+    where
+        Durability: DurabilityClient,
+    {
+        Self::load_with_backend::<KS>(name, path, durability_client, checkpoint, KVBackend::RocksDB)
+    }
+
+    pub fn load_with_backend<KS: KeyspaceSet>(
+        name: impl AsRef<str>,
+        path: &Path,
         mut durability_client: Durability,
-        checkpoint: &Option<CheckpointReader>,
+        checkpoint: &Option<Checkpoint>,
+        backend: KVBackend,
     ) -> Result<Self, StorageOpenError>
     where
         Durability: DurabilityClient,
@@ -134,30 +160,27 @@ impl<Durability> MVCCStorage<Durability> {
         let storage_dir = path.join(Self::STORAGE_DIR_NAME);
 
         Self::register_durability_record_types(&mut durability_client);
-        let (keyspaces, next_sequence_number) = if let Some(checkpoint) = checkpoint {
-            checkpoint
-                .recover_storage::<KS, _>(name, &storage_dir, &durability_client)
-                .map_err(|error| RecoverFromCheckpoint { name: name.to_owned(), typedb_source: error })?
-        } else {
-            match fs::remove_dir_all(&storage_dir) {
-                Err(err) if err.kind() != io::ErrorKind::NotFound => {
-                    return Err(StorageDirectoryRecreate { name: name.to_owned(), source: Arc::new(err) });
-                }
-                _ => (),
+        let (keyspaces, next_sequence_number) = match checkpoint {
+            None => {
+                fs::remove_dir_all(&storage_dir)
+                    .map_err(|err| StorageDirectoryRecreate { name: name.to_owned(), source: Arc::new(err) })?;
+                fs::create_dir_all(&storage_dir)
+                    .map_err(|err| StorageDirectoryRecreate { name: name.to_owned(), source: Arc::new(err) })?;
+                let keyspaces = Self::create_keyspaces::<KS>(name, &storage_dir, backend)?;
+                trace!("No checkpoint found, loading from WAL");
+                let commits = load_commit_data_from(SequenceNumber::MIN.next(), &durability_client, usize::MAX)
+                    .map_err(|err| RecoverFromDurability { name: name.to_owned(), typedb_source: err })?;
+                let next_sequence_number = commits.keys().max().cloned().unwrap_or(SequenceNumber::MIN).next();
+                apply_recovered(commits, &durability_client, &keyspaces)
+                    .map_err(|err| RecoverFromDurability { name: name.to_owned(), typedb_source: err })?;
+                trace!("Finished applying commits from WAL.");
+                (keyspaces, next_sequence_number)
             }
-            fail_point!(STORAGE_MISSING_STORAGE_DIR);
-            fs::create_dir_all(&storage_dir)
-                .map_err(|err| StorageDirectoryRecreate { name: name.to_owned(), source: Arc::new(err) })?;
-            fail_point!(STORAGE_EMPTY_STORAGE_DIR);
-            let keyspaces = Self::create_keyspaces::<KS>(name, &storage_dir)?;
-            trace!("No checkpoint found, loading from WAL");
-            let commits = load_commit_data_from(SequenceNumber::MIN.next(), &durability_client)
-                .map_err(|err| RecoverFromDurability { name: name.to_owned(), typedb_source: err })?;
-            let next_sequence_number = commits.keys().max().cloned().unwrap_or(SequenceNumber::MIN).next();
-            apply_recovered(name, commits, &durability_client, &keyspaces)
-                .map_err(|err| RecoverFromDurability { name: name.to_owned(), typedb_source: err })?;
-            trace!("Finished applying commits from WAL.");
-            (keyspaces, next_sequence_number)
+            Some(checkpoint) => {
+                checkpoint
+                    .recover_storage::<KS, _>(name, &storage_dir, &durability_client, backend)
+                    .map_err(|error| RecoverFromCheckpoint { name: name.to_owned(), typedb_source: error })?
+            }
         };
 
         let isolation_manager = IsolationManager::new(next_sequence_number);
