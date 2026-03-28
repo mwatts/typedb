@@ -12,6 +12,7 @@ use std::{
 };
 
 use cache::CACHE_DB_NAME_PREFIX;
+use kv;
 use resource::{constants::database::INTERNAL_DATABASE_PREFIX, internal_database_prefix};
 use storage::durability_client::WALClient;
 use tracing::{debug, event, warn, Level};
@@ -27,24 +28,31 @@ pub struct DatabaseManager {
     data_directory: PathBuf,
     import_directory: PathBuf,
     databases: Databases,
+    backend: kv::KVBackend,
 }
 
 impl DatabaseManager {
     const IMPORT_DIRECTORY_NAME: &'static str = concat!(internal_database_prefix!(), "import");
 
+    #[cfg(feature = "rocks")]
     pub fn new(data_directory: impl AsRef<Path>) -> Result<Arc<Self>, DatabaseOpenError> {
+        Self::new_with_backend(data_directory, kv::KVBackend::RocksDB)
+    }
+
+    pub fn new_with_backend(data_directory: impl AsRef<Path>, backend: kv::KVBackend) -> Result<Arc<Self>, DatabaseOpenError> {
         let data_directory = data_directory.as_ref().to_owned();
         let import_directory = data_directory.join(Self::IMPORT_DIRECTORY_NAME);
 
-        let databases = RwLock::new(Self::initialise_databases(&data_directory, &import_directory)?);
+        let databases = RwLock::new(Self::initialise_databases(&data_directory, &import_directory, backend)?);
         Self::cleanup_import_directory(&import_directory)?;
 
-        Ok(Arc::new(Self { data_directory, import_directory, databases }))
+        Ok(Arc::new(Self { data_directory, import_directory, databases, backend }))
     }
 
     fn initialise_databases(
         data_directory: &PathBuf,
         import_directory: &PathBuf,
+        backend: kv::KVBackend,
     ) -> Result<DatabasesMap, DatabaseOpenError> {
         let entries = fs::read_dir(data_directory).map_err(|error| DatabaseOpenError::DirectoryRead {
             name: Self::file_name_lossy(data_directory),
@@ -76,7 +84,7 @@ impl DatabaseManager {
                 continue;
             }
 
-            let database = match Database::<WALClient>::open(&entry_path) {
+            let database = match Database::<WALClient>::open_with_backend(&entry_path, backend) {
                 Ok(database) => database,
                 Err(DatabaseOpenError::NotADatabase { .. }) => {
                     warn!("{entry_path:?} is not a database, skipping");
@@ -302,12 +310,12 @@ impl DatabaseManager {
     }
 
     fn new_public_database(&self, name: &str) -> Result<Database<WALClient>, DatabaseCreateError> {
-        Database::<WALClient>::open(&self.data_directory.join(name))
+        Database::<WALClient>::open_with_backend(&self.data_directory.join(name), self.backend)
             .map_err(|typedb_source| DatabaseCreateError::DatabaseOpen { typedb_source })
     }
 
     fn new_imported_database(&self, name: &str) -> Result<Database<WALClient>, DatabaseCreateError> {
-        Database::<WALClient>::open(&self.import_directory.join(name))
+        Database::<WALClient>::open_with_backend(&self.import_directory.join(name), self.backend)
             .map_err(|typedb_source| DatabaseCreateError::DatabaseOpen { typedb_source })
     }
 

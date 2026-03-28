@@ -228,6 +228,7 @@ impl<D> Database<D> {
 }
 
 impl Database<WALClient> {
+    #[cfg(feature = "rocks")]
     pub fn open(path: &Path) -> Result<Database<WALClient>, DatabaseOpenError> {
         Self::open_with_backend(path, kv::KVBackend::RocksDB)
     }
@@ -245,6 +246,7 @@ impl Database<WALClient> {
         }
     }
 
+    #[cfg(feature = "rocks")]
     fn create(path: &Path, name: impl AsRef<str>) -> Result<Database<WALClient>, DatabaseOpenError> {
         Self::create_with_backend(path, name, kv::KVBackend::RocksDB)
     }
@@ -314,6 +316,7 @@ impl Database<WALClient> {
         })
     }
 
+    #[cfg(feature = "rocks")]
     fn load(path: &Path, name: impl AsRef<str>) -> Result<Database<WALClient>, DatabaseOpenError> {
         Self::load_with_backend(path, name, kv::KVBackend::RocksDB)
     }

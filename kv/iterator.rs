@@ -11,13 +11,16 @@ use error::TypeDBError;
 use lending_iterator::{LendingIterator, Seekable};
 use resource::constants::kv::ITERATOR_CONTINUE_CONDITION_INLINE;
 
-use crate::{memory::iterator::InMemoryRangeIterator, rocks::iterator::RocksRangeIterator};
+use crate::memory::iterator::InMemoryRangeIterator;
+#[cfg(feature = "rocks")]
+use crate::rocks::iterator::RocksRangeIterator;
 #[cfg(feature = "redb")]
 use crate::redb::iterator::RedbRangeIterator;
 
 pub type KVIteratorItem<'a> = Result<(&'a [u8], &'a [u8]), Box<dyn TypeDBError>>;
 
 pub enum KVRangeIterator {
+    #[cfg(feature = "rocks")]
     RocksDB(RocksRangeIterator),
     InMemory(InMemoryRangeIterator),
     #[cfg(feature = "redb")]
@@ -29,6 +32,7 @@ impl LendingIterator for KVRangeIterator {
 
     fn next(&mut self) -> Option<Self::Item<'_>> {
         match self {
+            #[cfg(feature = "rocks")]
             Self::RocksDB(iter) => iter.next(),
             Self::InMemory(iter) => iter.next(),
             #[cfg(feature = "redb")]
@@ -40,6 +44,7 @@ impl LendingIterator for KVRangeIterator {
 impl Seekable<[u8]> for KVRangeIterator {
     fn seek(&mut self, key: &[u8]) {
         match self {
+            #[cfg(feature = "rocks")]
             Self::RocksDB(iter) => iter.seek(key),
             Self::InMemory(iter) => iter.seek(key),
             #[cfg(feature = "redb")]
@@ -49,6 +54,7 @@ impl Seekable<[u8]> for KVRangeIterator {
 
     fn compare_key(&self, item: &Self::Item<'_>, key: &[u8]) -> Ordering {
         match self {
+            #[cfg(feature = "rocks")]
             Self::RocksDB(iter) => iter.compare_key(item, key),
             Self::InMemory(iter) => iter.compare_key(item, key),
             #[cfg(feature = "redb")]

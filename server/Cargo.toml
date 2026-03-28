@@ -123,7 +123,9 @@ dev-dependencies = {}
 		workspace = true
 
 	[dependencies.database]
-		workspace = true
+		path = "../database"
+		features = ["rocks"]
+		default-features = false
 
 	[dependencies.chrono-tz]
 		workspace = true
