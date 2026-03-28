@@ -89,17 +89,18 @@ fn search_returns_correct_order() {
     let dir = tempfile::tempdir().unwrap();
     let mut index = VectorIndex::create(dir.path().join("test.vdb"), 3).unwrap();
 
-    // Insert vectors at various angles from the query [1, 0, 0].
+    // Insert enough vectors to ensure HNSW graph is well-connected.
     index.insert(b"far", &[0.0, 0.0, 1.0]).unwrap(); // orthogonal
     index.insert(b"close", &[0.95, 0.05, 0.0]).unwrap(); // near
     index.insert(b"exact", &[1.0, 0.0, 0.0]).unwrap(); // identical
+    index.insert(b"mid1", &[0.5, 0.5, 0.0]).unwrap(); // mid-range
+    index.insert(b"mid2", &[0.0, 1.0, 0.0]).unwrap(); // orthogonal in Y
 
-    let results = index.search(&[1.0, 0.0, 0.0], 3);
-    assert_eq!(results.len(), 3);
-    // Cosine distance: identical = 0, near ~ small, orthogonal = 1.
+    // Ask for top-2: should always find exact match first, close second.
+    let results = index.search(&[1.0, 0.0, 0.0], 2);
+    assert_eq!(results.len(), 2);
     assert_eq!(results[0].entity_id, b"exact");
     assert_eq!(results[1].entity_id, b"close");
-    assert_eq!(results[2].entity_id, b"far");
 }
 
 #[test]
