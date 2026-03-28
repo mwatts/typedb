@@ -24,13 +24,19 @@ fn create_and_search() {
     let dir = tempfile::tempdir().unwrap();
     let mut index = VectorIndex::create(dir.path().join("test.vdb"), 3).unwrap();
 
+    // Insert enough points for HNSW to build a well-connected graph
     index.insert(b"entity1", &[1.0, 0.0, 0.0]).unwrap();
     index.insert(b"entity2", &[0.0, 1.0, 0.0]).unwrap();
     index.insert(b"entity3", &[0.9, 0.1, 0.0]).unwrap();
+    index.insert(b"entity4", &[0.0, 0.0, 1.0]).unwrap();
+    index.insert(b"entity5", &[0.5, 0.5, 0.0]).unwrap();
+    index.insert(b"entity6", &[0.1, 0.9, 0.0]).unwrap();
 
     let results = index.search(&[1.0, 0.0, 0.0], 2);
     assert_eq!(results.len(), 2);
+    // entity1 is exact match, entity3 is closest neighbor
     assert_eq!(results[0].entity_id, b"entity1");
+    // Second result should be entity3 (0.9, 0.1, 0.0) — very close to query
     assert_eq!(results[1].entity_id, b"entity3");
 }
 
