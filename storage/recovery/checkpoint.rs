@@ -154,9 +154,13 @@ impl CheckpointReader {
         }
 
         // TODO(thyra): Make backend configurable for checkpoint recovery.
-        // For now, default to RocksDB. When the database stores its backend
-        // preference, checkpoint recovery should respect it.
+        // For now, default to RocksDB when available.
+        #[cfg(feature = "rocks")]
         let keyspaces = KVBackend::RocksDB
+            .open_keyspaces::<KS>(keyspaces_dir)
+            .map_err(|error| KeyspacesOpen { typedb_source: error })?;
+        #[cfg(not(feature = "rocks"))]
+        let keyspaces = KVBackend::InMemory
             .open_keyspaces::<KS>(keyspaces_dir)
             .map_err(|error| KeyspacesOpen { typedb_source: error })?;
 

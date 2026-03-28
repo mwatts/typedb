@@ -89,6 +89,7 @@ pub struct MVCCStorage<Durability> {
 impl<Durability> MVCCStorage<Durability> {
     pub const STORAGE_DIR_NAME: &'static str = "storage";
 
+    #[cfg(feature = "rocks")]
     pub fn create<KS: KeyspaceSet>(
         name: impl AsRef<str>,
         path: &Path,
@@ -145,6 +146,7 @@ impl<Durability> MVCCStorage<Durability> {
         Ok(keyspaces)
     }
 
+    #[cfg(feature = "rocks")]
     pub fn load<KS: KeyspaceSet>(
         name: impl AsRef<str>,
         path: &Path,
