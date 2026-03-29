@@ -86,4 +86,5 @@ redb = ["dep:redb"]
 
 [dev-dependencies]
 	tempfile = "3"
+	proptest = "1"
 
