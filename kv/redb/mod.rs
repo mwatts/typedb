@@ -231,9 +231,26 @@ impl RedbKVStore {
         Ok(())
     }
 
-    pub fn checkpoint(&self, _checkpoint_dir: &Path) -> Result<(), Box<dyn TypeDBError>> {
-        // redb does not have a built-in checkpoint mechanism. A file copy could be used
-        // but for now this is a no-op, matching the InMemory backend behaviour.
+    pub fn checkpoint(&self, checkpoint_dir: &Path) -> Result<(), Box<dyn TypeDBError>> {
+        // Copy the .redb file to the checkpoint directory, preserving the keyspace name
+        // as a subdirectory (matching RocksDB's convention — restore_storage_from_checkpoint
+        // expects checkpoint_dir/<keyspace_name>/ to be a directory it can read_dir).
+        let keyspace_checkpoint_dir = checkpoint_dir.join(self.name);
+        if keyspace_checkpoint_dir.exists() {
+            return Err(RedbKVError::Checkpoint {
+                name: self.name,
+                detail: format!("checkpoint directory already exists: {}", keyspace_checkpoint_dir.display()),
+            }.into());
+        }
+        fs::create_dir_all(&keyspace_checkpoint_dir)
+            .map_err(|e| RedbKVError::Checkpoint { name: self.name, detail: e.to_string() })?;
+
+        // redb is ACID — the file is always in a consistent state, so a direct
+        // copy is safe without explicit compaction.
+        // Copy the .redb file into the checkpoint keyspace directory
+        let dest = keyspace_checkpoint_dir.join(self.path.file_name().unwrap());
+        fs::copy(&self.path, &dest)
+            .map_err(|e| RedbKVError::Checkpoint { name: self.name, detail: e.to_string() })?;
         Ok(())
     }
 
@@ -308,6 +325,7 @@ typedb_error! {
         BatchWrite(4, "Redb error writing batch to kv store {name}: {detail}.", name: &'static str, detail: String),
         Iterate(5, "Redb error iterating kv store {name}: {detail}.", name: &'static str, detail: String),
         Reset(6, "Redb error resetting kv store {name}: {detail}.", name: &'static str, detail: String),
+        Checkpoint(7, "Redb checkpoint error for kv store {name}: {detail}.", name: &'static str, detail: String),
         DeleteErrorFileRemove(30, "Failed to delete file of kv store {name}.", name: &'static str, source: Arc<io::Error>),
     }
 }

@@ -722,6 +722,11 @@ mod tests {
         let key_1 = StorageKeyArray::from((TestKeyspaceSet::PersistedKeyspace, b"hello"));
         let key_2 = StorageKeyArray::from((TestKeyspaceSet::FailedKeyspace, b"world"));
 
+        #[cfg(feature = "test-redb")]
+        let backend = KVBackend::Redb;
+        #[cfg(not(feature = "test-redb"))]
+        let backend = KVBackend::RocksDB;
+
         let seq = {
             let mut full_operations = OperationsBuffer::new();
             full_operations.writes_in_mut(key_1.keyspace_id()).insert(key_1.byte_array().clone(), ByteArray::empty());
@@ -739,16 +744,10 @@ mod tests {
                 .unwrap();
 
             let partial_commit = WriteBatches::from_operations(seq, &partial_operations);
-
-            #[cfg(feature = "test-redb")]
-            let backend = KVBackend::Redb;
-            #[cfg(not(feature = "test-redb"))]
-            let backend = KVBackend::RocksDB;
-
-            let keyspaces = backend.open_keyspaces::<TestKeyspaceSet>(
-                storage_path.join(MVCCStorage::<WALClient>::STORAGE_DIR_NAME).as_path(),
-            )
-            .unwrap();
+            let storage_dir = storage_path.join(MVCCStorage::<WALClient>::STORAGE_DIR_NAME);
+            std::fs::create_dir_all(&storage_dir).unwrap();
+            let keyspaces = backend.open_keyspaces::<TestKeyspaceSet>(storage_dir.as_path())
+                .unwrap();
             keyspaces.write(partial_commit).unwrap();
 
             /* CRASH */
@@ -759,7 +758,7 @@ mod tests {
         let mut durability_client = WALClient::new(WAL::load(storage_path.join(WAL::WAL_DIR_NAME)).unwrap());
         durability_client.register_record_type::<CommitRecord>();
         let storage =
-            MVCCStorage::<WALClient>::load::<TestKeyspaceSet>("storage", &storage_path, durability_client, &None)
+            MVCCStorage::<WALClient>::load_with_backend::<TestKeyspaceSet>("storage", &storage_path, durability_client, &None, backend)
                 .unwrap();
         assert_eq!(storage.get::<0>(&key_2, seq, StorageCounters::DISABLED).unwrap().unwrap(), ByteArray::empty());
     }
