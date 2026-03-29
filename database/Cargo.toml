@@ -7,6 +7,7 @@ default = ["rocks", "diagnostics"]
 rocks = ["kv/rocks", "storage/rocks", "cache/rocks"]
 redb = ["kv/redb", "storage/redb", "cache/redb"]
 diagnostics = ["dep:diagnostics"]
+test-redb = ["redb"]
 
 [package]
 	name = "database"

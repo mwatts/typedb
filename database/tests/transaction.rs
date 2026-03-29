@@ -38,6 +38,10 @@ macro_rules! assert_transaction_timeout {
 }
 
 fn create_database(databases_path: &TempDir) -> Arc<Database<WALClient>> {
+    #[cfg(feature = "test-redb")]
+    let database_manager = DatabaseManager::new_with_backend(databases_path, kv::KVBackend::Redb)
+        .expect("Expected database manager");
+    #[cfg(not(feature = "test-redb"))]
     let database_manager = DatabaseManager::new(databases_path).expect("Expected database manager");
     database_manager.put_database(DB_NAME).expect("Expected database creation");
     database_manager.database(DB_NAME).expect("Expected database retrieval")

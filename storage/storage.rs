@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_recovery_from_partial_write() {
-        use kv::KVStore;
+        use kv::{KVBackend, KVStore};
 
         use crate::FromOperationsBuffer;
         test_keyspace_set! {
@@ -739,7 +739,13 @@ mod tests {
                 .unwrap();
 
             let partial_commit = WriteBatches::from_operations(seq, &partial_operations);
-            let keyspaces = KVBackend::RocksDB.open_keyspaces::<TestKeyspaceSet>(
+
+            #[cfg(feature = "test-redb")]
+            let backend = KVBackend::Redb;
+            #[cfg(not(feature = "test-redb"))]
+            let backend = KVBackend::RocksDB;
+
+            let keyspaces = backend.open_keyspaces::<TestKeyspaceSet>(
                 storage_path.join(MVCCStorage::<WALClient>::STORAGE_DIR_NAME).as_path(),
             )
             .unwrap();
