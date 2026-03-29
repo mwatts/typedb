@@ -148,3 +148,74 @@ fn search_scores_descending() {
         );
     }
 }
+
+// Edge case tests
+
+#[test]
+fn empty_document_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = FullTextIndex::create(dir.path().join("fts")).unwrap();
+    index.index_document("doc1", "").unwrap();
+    assert_eq!(index.count().unwrap(), 1);
+    // Empty text shouldn't match any search
+    let results = index.search("anything", 10).unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn very_long_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = FullTextIndex::create(dir.path().join("fts")).unwrap();
+    let long_text = "word ".repeat(5000);
+    index.index_document("doc1", &long_text).unwrap();
+    let results = index.search("word", 10).unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn unicode_text_search() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = FullTextIndex::create(dir.path().join("fts")).unwrap();
+    index.index_document("hebrew", "שלום עולם").unwrap();
+    index.index_document("emoji", "hello 🦀 world").unwrap();
+    index.index_document("cjk", "你好世界").unwrap();
+    // At least searching for the ASCII portion should work
+    let results = index.search("hello", 10).unwrap();
+    assert!(results.len() >= 1);
+}
+
+#[test]
+fn empty_query_string() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = FullTextIndex::create(dir.path().join("fts")).unwrap();
+    index.index_document("doc1", "hello world").unwrap();
+    // Empty query -- should either return empty or error, not panic
+    let result = index.search("", 10);
+    // Don't assert Ok or Err -- just assert no panic
+    let _ = result;
+}
+
+#[test]
+fn special_query_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = FullTextIndex::create(dir.path().join("fts")).unwrap();
+    index.index_document("doc1", "hello world").unwrap();
+    // These shouldn't panic
+    let _ = index.search("+hello -world", 10);
+    let _ = index.search("hello AND world", 10);
+    let _ = index.search("\"exact phrase\"", 10);
+    let _ = index.search("wild*", 10);
+}
+
+#[test]
+fn index_same_entity_twice_replaces() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = FullTextIndex::create(dir.path().join("fts")).unwrap();
+    index.index_document("doc1", "first version").unwrap();
+    index.index_document("doc1", "second version").unwrap();
+    assert_eq!(index.count().unwrap(), 1, "Should have 1 document, not 2");
+    let results = index.search("second", 10).unwrap();
+    assert_eq!(results.len(), 1);
+    let results = index.search("first", 10).unwrap();
+    assert!(results.is_empty(), "Old content should be gone");
+}
