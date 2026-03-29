@@ -214,4 +214,68 @@ mod tests {
         store.delete().unwrap();
         assert!(!path.exists());
     }
+
+    mod property_tests {
+        use super::*;
+        use proptest::prelude::*;
+        use proptest::collection::vec;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(100))]
+
+            #[test]
+            fn put_get_roundtrip(
+                key in vec(any::<u8>(), 1..256),
+                value in vec(any::<u8>(), 0..4096)
+            ) {
+                let (store, _dir) = create_store();
+                store.put(&key, &value).unwrap();
+                let result = store.get(&key, |v| v.to_vec()).unwrap();
+                prop_assert_eq!(result, Some(value));
+            }
+
+            #[test]
+            fn range_iteration_sorted(
+                entries in vec((vec(any::<u8>(), 1..32), vec(any::<u8>(), 1..32)), 1..50)
+            ) {
+                let (store, _dir) = create_store();
+                for (k, v) in &entries {
+                    store.put(k, v).unwrap();
+                }
+                // Use an unbounded range starting from empty byte to capture all keys
+                let start: Bytes<'_, 64> = Bytes::copy(&[0u8]);
+                let range = KeyRange::new_unbounded(RangeStart::Inclusive(start));
+                let mut iter = store.iterate_range(&range, StorageCounters::DISABLED);
+
+                let mut keys: Vec<Vec<u8>> = Vec::new();
+                while let Some(Ok((k, _v))) = iter.next() {
+                    keys.push(k.to_vec());
+                }
+                // Verify keys are in sorted order
+                for w in keys.windows(2) {
+                    prop_assert!(w[0] <= w[1], "Keys not sorted: {:?} > {:?}", w[0], w[1]);
+                }
+            }
+
+            #[test]
+            fn overwrite_preserves_latest(
+                key in vec(any::<u8>(), 1..64),
+                values in vec(vec(any::<u8>(), 1..128), 2..10)
+            ) {
+                let (store, _dir) = create_store();
+                for v in &values {
+                    store.put(&key, v).unwrap();
+                }
+                let result = store.get(&key, |v| v.to_vec()).unwrap();
+                prop_assert_eq!(result, Some(values.last().unwrap().clone()));
+            }
+
+            #[test]
+            fn get_nonexistent_returns_none(key in vec(any::<u8>(), 1..256)) {
+                let (store, _dir) = create_store();
+                let result = store.get(&key, |v| v.to_vec()).unwrap();
+                prop_assert_eq!(result, None);
+            }
+        }
+    }
 }
