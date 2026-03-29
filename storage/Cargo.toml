@@ -6,6 +6,7 @@
 default = ["rocks"]
 rocks = ["kv/rocks", "dep:rocksdb"]
 redb = ["kv/redb"]
+test-redb = ["test_utils_storage/test-redb", "redb"]
 
 [package]
 	name = "storage"

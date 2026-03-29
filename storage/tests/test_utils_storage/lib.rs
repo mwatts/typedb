@@ -32,9 +32,16 @@ macro_rules! test_keyspace_set {
     };
 }
 
+pub fn test_backend() -> kv::KVBackend {
+    #[cfg(feature = "test-redb")]
+    { kv::KVBackend::Redb }
+    #[cfg(not(feature = "test-redb"))]
+    { kv::KVBackend::RocksDB }
+}
+
 pub fn create_storage<KS: KeyspaceSet>(path: &Path) -> Result<Arc<MVCCStorage<WALClient>>, StorageOpenError> {
     let wal = WAL::create(path).unwrap();
-    let storage = MVCCStorage::create::<KS>("storage", path, WALClient::new(wal))?;
+    let storage = MVCCStorage::create_with_backend::<KS>("storage", path, WALClient::new(wal), test_backend())?;
     Ok(Arc::new(storage))
 }
 
@@ -49,6 +56,6 @@ pub fn load_storage<KS: KeyspaceSet>(
     wal: WAL,
     checkpoint: Option<CheckpointReader>,
 ) -> Result<Arc<MVCCStorage<WALClient>>, StorageOpenError> {
-    let storage = MVCCStorage::load::<KS>("storage", path, WALClient::new(wal), &checkpoint)?;
+    let storage = MVCCStorage::load_with_backend::<KS>("storage", path, WALClient::new(wal), &checkpoint, test_backend())?;
     Ok(Arc::new(storage))
 }
