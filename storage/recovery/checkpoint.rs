@@ -148,21 +148,40 @@ impl CheckpointReader {
         for keyspace in KS::iter() {
             let keyspace_dir = keyspaces_dir.join(keyspace.name());
             let keyspace_checkpoint_dir = self.directory.join(keyspace.name());
-            trace!("Recovering keyspace from checkpoint");
-            restore_storage_from_checkpoint(keyspace_dir, keyspace_checkpoint_dir)
-                .map_err(|error| CheckpointRestore { dir: self.directory.clone(), source: Arc::new(error) })?;
+            trace!("Recovering keyspace '{}' from checkpoint", keyspace.name());
+
+            // redb checkpoints store a single .redb file inside the keyspace checkpoint dir.
+            // Check if this is a redb checkpoint (contains a .redb file) and handle accordingly.
+            let redb_checkpoint_file = keyspace_checkpoint_dir.join(format!("{}.redb", keyspace.name()));
+            if redb_checkpoint_file.exists() {
+                // redb: copy the .redb file directly into the storage dir (not a subdirectory)
+                let dest = keyspaces_dir.join(format!("{}.redb", keyspace.name()));
+                fs::copy(&redb_checkpoint_file, &dest)
+                    .map_err(|error| CheckpointRestore { dir: self.directory.clone(), source: Arc::new(error) })?;
+            } else {
+                // RocksDB: copy directory contents (existing behavior)
+                restore_storage_from_checkpoint(keyspace_dir, keyspace_checkpoint_dir)
+                    .map_err(|error| CheckpointRestore { dir: self.directory.clone(), source: Arc::new(error) })?;
+            }
         }
 
-        // TODO(thyra): Make backend configurable for checkpoint recovery.
-        // For now, default to RocksDB when available.
-        #[cfg(feature = "rocks")]
-        let keyspaces = KVBackend::RocksDB
-            .open_keyspaces::<KS>(keyspaces_dir)
-            .map_err(|error| KeyspacesOpen { typedb_source: error })?;
-        #[cfg(not(feature = "rocks"))]
-        let keyspaces = KVBackend::InMemory
-            .open_keyspaces::<KS>(keyspaces_dir)
-            .map_err(|error| KeyspacesOpen { typedb_source: error })?;
+        // Select backend based on what's available. If the checkpoint contained .redb files,
+        // use redb. Otherwise use RocksDB (or InMemory as fallback).
+        let has_redb_files = KS::iter().any(|ks| keyspaces_dir.join(format!("{}.redb", ks.name())).exists());
+        let keyspaces = if has_redb_files {
+            #[cfg(feature = "redb")]
+            { KVBackend::Redb.open_keyspaces::<KS>(keyspaces_dir)
+                .map_err(|error| KeyspacesOpen { typedb_source: error })? }
+            #[cfg(not(feature = "redb"))]
+            { panic!("Checkpoint contains redb files but redb feature is not enabled"); }
+        } else {
+            #[cfg(feature = "rocks")]
+            { KVBackend::RocksDB.open_keyspaces::<KS>(keyspaces_dir)
+                .map_err(|error| KeyspacesOpen { typedb_source: error })? }
+            #[cfg(not(feature = "rocks"))]
+            { KVBackend::InMemory.open_keyspaces::<KS>(keyspaces_dir)
+                .map_err(|error| KeyspacesOpen { typedb_source: error })? }
+        };
 
         trace!("Finished recovering keyspaces, recovering missing commits");
 
