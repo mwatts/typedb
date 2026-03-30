@@ -9,6 +9,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    time::Duration,
 };
 
 use cache::CACHE_DB_NAME_PREFIX;
@@ -23,12 +24,32 @@ type DatabasesMap = HashMap<String, Arc<Database<WALClient>>>;
 type Databases = RwLock<DatabasesMap>;
 type DatabasesWriteLock<'a> = RwLockWriteGuard<'a, DatabasesMap>;
 
+/// Options for configuring database background task intervals.
+#[derive(Debug, Clone)]
+pub struct DatabaseManagerOptions {
+    /// Checkpoint interval. `None` disables periodic checkpointing.
+    pub checkpoint_interval: Option<Duration>,
+    /// Statistics update interval. `None` disables periodic statistics updates.
+    pub statistics_interval: Option<Duration>,
+}
+
+impl Default for DatabaseManagerOptions {
+    fn default() -> Self {
+        use resource::constants::database::{CHECKPOINT_INTERVAL, STATISTICS_UPDATE_INTERVAL};
+        Self {
+            checkpoint_interval: Some(CHECKPOINT_INTERVAL),
+            statistics_interval: Some(STATISTICS_UPDATE_INTERVAL),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DatabaseManager {
     data_directory: PathBuf,
     import_directory: PathBuf,
     databases: Databases,
     backend: kv::KVBackend,
+    options: DatabaseManagerOptions,
 }
 
 impl DatabaseManager {
@@ -40,19 +61,28 @@ impl DatabaseManager {
     }
 
     pub fn new_with_backend(data_directory: impl AsRef<Path>, backend: kv::KVBackend) -> Result<Arc<Self>, DatabaseOpenError> {
+        Self::new_with_backend_and_options(data_directory, backend, DatabaseManagerOptions::default())
+    }
+
+    pub fn new_with_backend_and_options(
+        data_directory: impl AsRef<Path>,
+        backend: kv::KVBackend,
+        options: DatabaseManagerOptions,
+    ) -> Result<Arc<Self>, DatabaseOpenError> {
         let data_directory = data_directory.as_ref().to_owned();
         let import_directory = data_directory.join(Self::IMPORT_DIRECTORY_NAME);
 
-        let databases = RwLock::new(Self::initialise_databases(&data_directory, &import_directory, backend)?);
+        let databases = RwLock::new(Self::initialise_databases(&data_directory, &import_directory, backend, &options)?);
         Self::cleanup_import_directory(&import_directory)?;
 
-        Ok(Arc::new(Self { data_directory, import_directory, databases, backend }))
+        Ok(Arc::new(Self { data_directory, import_directory, databases, backend, options }))
     }
 
     fn initialise_databases(
         data_directory: &PathBuf,
         import_directory: &PathBuf,
         backend: kv::KVBackend,
+        options: &DatabaseManagerOptions,
     ) -> Result<DatabasesMap, DatabaseOpenError> {
         let entries = fs::read_dir(data_directory).map_err(|error| DatabaseOpenError::DirectoryRead {
             name: Self::file_name_lossy(data_directory),
@@ -84,7 +114,7 @@ impl DatabaseManager {
                 continue;
             }
 
-            let database = match Database::<WALClient>::open_with_backend(&entry_path, backend) {
+            let database = match Database::<WALClient>::open_with_backend_and_options(&entry_path, backend, options.checkpoint_interval, options.statistics_interval) {
                 Ok(database) => database,
                 Err(DatabaseOpenError::NotADatabase { .. }) => {
                     warn!("{entry_path:?} is not a database, skipping");
@@ -310,13 +340,23 @@ impl DatabaseManager {
     }
 
     fn new_public_database(&self, name: &str) -> Result<Database<WALClient>, DatabaseCreateError> {
-        Database::<WALClient>::open_with_backend(&self.data_directory.join(name), self.backend)
-            .map_err(|typedb_source| DatabaseCreateError::DatabaseOpen { typedb_source })
+        Database::<WALClient>::open_with_backend_and_options(
+            &self.data_directory.join(name),
+            self.backend,
+            self.options.checkpoint_interval,
+            self.options.statistics_interval,
+        )
+        .map_err(|typedb_source| DatabaseCreateError::DatabaseOpen { typedb_source })
     }
 
     fn new_imported_database(&self, name: &str) -> Result<Database<WALClient>, DatabaseCreateError> {
-        Database::<WALClient>::open_with_backend(&self.import_directory.join(name), self.backend)
-            .map_err(|typedb_source| DatabaseCreateError::DatabaseOpen { typedb_source })
+        Database::<WALClient>::open_with_backend_and_options(
+            &self.import_directory.join(name),
+            self.backend,
+            self.options.checkpoint_interval,
+            self.options.statistics_interval,
+        )
+        .map_err(|typedb_source| DatabaseCreateError::DatabaseOpen { typedb_source })
     }
 
     fn exists_public<'a>(&'a self, databases: &'a DatabasesWriteLock<'a>, name: &str) -> bool {
@@ -359,5 +399,19 @@ impl DatabaseManager {
             return Err(DatabaseCreateError::InvalidName { name: name.to_string() });
         }
         Ok(())
+    }
+}
+
+impl Drop for DatabaseManager {
+    fn drop(&mut self) {
+        // Signal all databases to stop background work (checkpoint, statistics).
+        // This is critical for embedded mode: if a transaction holds an Arc<Database>
+        // that outlives this manager (and its data directory), the background threads
+        // must not attempt IO on a potentially-deleted directory.
+        if let Ok(databases) = self.databases.read() {
+            for db in databases.values() {
+                db.signal_shutdown();
+            }
+        }
     }
 }

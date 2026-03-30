@@ -10,6 +10,7 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{sync_channel, SyncSender},
         Arc, Mutex, MutexGuard, RwLock, TryLockError,
     },
@@ -81,6 +82,11 @@ pub struct Database<D> {
     pub(super) schema: Arc<RwLock<Schema>>,
     pub(super) query_cache: Arc<QueryCache>,
     schema_write_transaction_exclusivity: Mutex<SchemaWriteTransactionState>,
+    /// Shared flag that background threads check before performing work.
+    /// Set to `true` when the owning DatabaseManager is shutting down,
+    /// which stops checkpoint/statistics threads even if Arc<Database>
+    /// references are still held by open transactions.
+    shutdown: Arc<AtomicBool>,
     _statistics_updater: IntervalRunner,
     _checkpointer: IntervalRunner,
 }
@@ -101,6 +107,14 @@ impl<D> Database<D> {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Signal background threads (checkpoint, statistics) to stop, without
+    /// waiting for the Database to be fully dropped. This is used by
+    /// DatabaseManager to stop background work when the manager is torn down,
+    /// even if Arc<Database> references are still held by open transactions.
+    pub fn signal_shutdown(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
     }
 
     pub(super) fn reserve_write_transaction(&self, timeout_millis: u64) -> Result<(), TransactionError> {
@@ -235,24 +249,39 @@ impl Database<WALClient> {
     }
 
     pub fn open_with_backend(path: &Path, backend: kv::KVBackend) -> Result<Database<WALClient>, DatabaseOpenError> {
+        Self::open_with_backend_and_options(path, backend, Some(CHECKPOINT_INTERVAL), Some(STATISTICS_UPDATE_INTERVAL))
+    }
+
+    pub fn open_with_backend_and_options(
+        path: &Path,
+        backend: kv::KVBackend,
+        checkpoint_interval: Option<Duration>,
+        statistics_interval: Option<Duration>,
+    ) -> Result<Database<WALClient>, DatabaseOpenError> {
         use DatabaseOpenError::InvalidUnicodeName;
 
         let file_name = path.file_name().unwrap();
         let name = file_name.to_str().ok_or_else(|| InvalidUnicodeName { name: file_name.to_owned() })?;
 
         if path.exists() {
-            Self::load_with_backend(path, name, backend)
+            Self::load_with_backend(path, name, backend, checkpoint_interval, statistics_interval)
         } else {
-            Self::create_with_backend(path, name, backend)
+            Self::create_with_backend(path, name, backend, checkpoint_interval, statistics_interval)
         }
     }
 
     #[cfg(feature = "rocks")]
     fn create(path: &Path, name: impl AsRef<str>) -> Result<Database<WALClient>, DatabaseOpenError> {
-        Self::create_with_backend(path, name, kv::KVBackend::RocksDB)
+        Self::create_with_backend(path, name, kv::KVBackend::RocksDB, Some(CHECKPOINT_INTERVAL), Some(STATISTICS_UPDATE_INTERVAL))
     }
 
-    fn create_with_backend(path: &Path, name: impl AsRef<str>, backend: kv::KVBackend) -> Result<Database<WALClient>, DatabaseOpenError> {
+    fn create_with_backend(
+        path: &Path,
+        name: impl AsRef<str>,
+        backend: kv::KVBackend,
+        checkpoint_interval: Option<Duration>,
+        statistics_interval: Option<Duration>,
+    ) -> Result<Database<WALClient>, DatabaseOpenError> {
         use DatabaseOpenError::{
             DirectoryCreate, Encoding, FunctionCacheInitialise, StorageOpen, TypeCacheInitialise, WALOpen,
         };
@@ -293,14 +322,10 @@ impl Database<WALClient> {
         let schema_txn_lock = Arc::new(RwLock::default());
 
         let query_cache = Arc::new(QueryCache::new());
-        let update_statistics = make_update_statistics_fn(
-            name.to_owned(),
-            storage.clone(),
-            schema.clone(),
-            schema_txn_lock.clone(),
-            query_cache.clone(),
-        );
-        let checkpoint_fn = make_checkpoint_fn(name.to_owned(), path.to_owned(), SequenceNumber::MIN, storage.clone());
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let update_statistics =
+            make_update_statistics_fn(storage.clone(), schema.clone(), schema_txn_lock.clone(), query_cache.clone(), shutdown.clone());
+        let checkpoint_fn = make_checkpoint_fn(path.to_owned(), SequenceNumber::MIN, storage.clone(), shutdown.clone());
 
         Ok(Database::<WALClient> {
             name: name.to_owned(),
@@ -312,17 +337,24 @@ impl Database<WALClient> {
             schema,
             query_cache,
             schema_write_transaction_exclusivity: Mutex::new((false, 0, VecDeque::with_capacity(100))),
-            _statistics_updater: IntervalRunner::new(update_statistics, STATISTICS_UPDATE_INTERVAL),
-            _checkpointer: IntervalRunner::new(checkpoint_fn, CHECKPOINT_INTERVAL),
+            shutdown,
+            _statistics_updater: IntervalRunner::maybe_new(statistics_interval, update_statistics),
+            _checkpointer: IntervalRunner::maybe_new(checkpoint_interval, checkpoint_fn),
         })
     }
 
     #[cfg(feature = "rocks")]
     fn load(path: &Path, name: impl AsRef<str>) -> Result<Database<WALClient>, DatabaseOpenError> {
-        Self::load_with_backend(path, name, kv::KVBackend::RocksDB)
+        Self::load_with_backend(path, name, kv::KVBackend::RocksDB, Some(CHECKPOINT_INTERVAL), Some(STATISTICS_UPDATE_INTERVAL))
     }
 
-    fn load_with_backend(path: &Path, name: impl AsRef<str>, backend: kv::KVBackend) -> Result<Database<WALClient>, DatabaseOpenError> {
+    fn load_with_backend(
+        path: &Path,
+        name: impl AsRef<str>,
+        backend: kv::KVBackend,
+        checkpoint_interval: Option<Duration>,
+        statistics_interval: Option<Duration>,
+    ) -> Result<Database<WALClient>, DatabaseOpenError> {
         use DatabaseOpenError::{
             CheckpointCreate, CheckpointLoad, DurabilityClientRead, Encoding, NotADatabase, StatisticsInitialise,
             StorageOpen, TypeCacheInitialise, WALOpen,
@@ -403,15 +435,10 @@ impl Database<WALClient> {
         };
 
         let query_cache = Arc::new(QueryCache::new());
-        let update_statistics = make_update_statistics_fn(
-            name.to_owned(),
-            storage.clone(),
-            schema.clone(),
-            schema_txn_lock.clone(),
-            query_cache.clone(),
-        );
-        let checkpoint_fn =
-            make_checkpoint_fn(name.to_owned(), path.to_owned(), checkpoint_sequence_number, storage.clone());
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let update_statistics =
+            make_update_statistics_fn(storage.clone(), schema.clone(), schema_txn_lock.clone(), query_cache.clone(), shutdown.clone());
+        let checkpoint_fn = make_checkpoint_fn(path.to_owned(), checkpoint_sequence_number, storage.clone(), shutdown.clone());
 
         let database = Database::<WALClient> {
             name: name.to_owned(),
@@ -423,12 +450,9 @@ impl Database<WALClient> {
             schema,
             query_cache,
             schema_write_transaction_exclusivity: Mutex::new((false, 0, VecDeque::with_capacity(100))),
-            _statistics_updater: IntervalRunner::new(update_statistics, STATISTICS_UPDATE_INTERVAL),
-            _checkpointer: IntervalRunner::new_with_initial_delay(
-                checkpoint_fn,
-                CHECKPOINT_INTERVAL,
-                CHECKPOINT_INTERVAL,
-            ),
+            shutdown,
+            _statistics_updater: IntervalRunner::maybe_new(statistics_interval, update_statistics),
+            _checkpointer: IntervalRunner::maybe_new_with_initial_delay(checkpoint_interval, checkpoint_fn),
         };
 
         if checkpoint_sequence_number < wal_last_sequence_number {
@@ -529,12 +553,24 @@ fn make_checkpoint_fn(
     path: PathBuf,
     mut prev_checkpoint: SequenceNumber,
     storage: Arc<MVCCStorage<WALClient>>,
+    shutdown: Arc<AtomicBool>,
 ) -> impl FnMut() {
     move || {
+        if shutdown.load(Ordering::Relaxed) {
+            return;
+        }
         let watermark = storage.snapshot_watermark();
         if prev_checkpoint < watermark {
-            checkpoint_storage(&database_name, &path, &storage).unwrap();
-            prev_checkpoint = watermark;
+            match Checkpoint::new(&path).and_then(|checkpoint| {
+                storage.checkpoint(&checkpoint)?;
+                checkpoint.finish()?;
+                Ok(())
+            }) {
+                Ok(()) => prev_checkpoint = watermark,
+                Err(e) => {
+                    event!(Level::WARN, "Checkpoint failed (will retry next interval): {e:?}");
+                }
+            }
         }
     }
 }
@@ -559,9 +595,13 @@ fn make_update_statistics_fn(
     schema: Arc<RwLock<Schema>>,
     schema_txn_lock: Arc<RwLock<()>>,
     query_cache: Arc<QueryCache>,
+    shutdown: Arc<AtomicBool>,
 ) -> impl Fn() {
     move || {
-        if storage.snapshot_watermark() > schema.read().unwrap().thing_statistics.sequence_number {
+        if shutdown.load(Ordering::Relaxed) {
+            return;
+        }
+        if storage.snapshot_watermark() > (*schema).read().unwrap().thing_statistics.sequence_number {
             let _schema_txn_guard = schema_txn_lock.read().unwrap(); // prevent Schema txns from opening during statistics update
             let mut new_statistics = (*schema.read().unwrap().thing_statistics).clone();
             debug!("Starting updating statistics for database {database_name}");
