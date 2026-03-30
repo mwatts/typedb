@@ -6,6 +6,8 @@
 pub(crate) mod iterator;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_property;
 
 use std::{
     fs,

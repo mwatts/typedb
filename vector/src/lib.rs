@@ -31,6 +31,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod tests_property;
+
 // ─── redb table definitions ────────────────────────────────────────
 
 /// Maps entity_id bytes -> bincode-encoded Vec<f32>.
@@ -142,14 +145,33 @@ pub type Result<T> = std::result::Result<T, VectorError>;
 
 // ─── HNSW parameters ──────────────────────────────────────────────
 
-/// Maximum number of neighbors per node in the HNSW graph.
-const HNSW_MAX_NB_CONNECTION: usize = 16;
+/// Configuration for HNSW vector index construction.
+///
+/// Controls the quality/speed trade-off of the approximate nearest-neighbor
+/// index. The defaults match the previously hardcoded values and are
+/// reasonable for most workloads up to ~100k vectors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VectorIndexConfig {
+    /// Maximum number of neighbors per node in the HNSW graph (`M`).
+    /// Higher values improve recall at the cost of memory and insert speed.
+    pub m: usize,
+    /// Size of the dynamic candidate list during construction (`ef_construction`).
+    /// Higher values improve graph quality at the cost of build time.
+    pub ef_construction: usize,
+    /// Initial capacity hint for the HNSW index.
+    /// Pre-allocates internal structures for this many vectors.
+    pub initial_capacity: usize,
+}
 
-/// Size of the dynamic candidate list during construction.
-const HNSW_EF_CONSTRUCTION: usize = 200;
-
-/// Initial capacity hint for the HNSW index.
-const HNSW_INITIAL_CAPACITY: usize = 1000;
+impl Default for VectorIndexConfig {
+    fn default() -> Self {
+        Self {
+            m: 16,
+            ef_construction: 200,
+            initial_capacity: 1000,
+        }
+    }
+}
 
 // ─── VectorIndex ───────────────────────────────────────────────────
 
@@ -160,50 +182,68 @@ const HNSW_INITIAL_CAPACITY: usize = 1000;
 pub struct VectorIndex {
     db: Database,
     dimension: usize,
+    config: VectorIndexConfig,
     hnsw: Hnsw<'static, f32, DistCosine>,
     /// Maps internal HNSW data-id (usize) -> external entity_id bytes.
     id_to_entity: Vec<Vec<u8>>,
 }
 
 impl VectorIndex {
-    /// Create a new vector index at `path` with the given vector dimension.
+    /// Create a new vector index at `path` with the given vector dimension
+    /// and default HNSW parameters.
     pub fn create(path: impl AsRef<Path>, dimension: usize) -> Result<Self> {
+        Self::create_with_config(path, dimension, VectorIndexConfig::default())
+    }
+
+    /// Create a new vector index at `path` with the given vector dimension
+    /// and explicit HNSW configuration.
+    pub fn create_with_config(
+        path: impl AsRef<Path>,
+        dimension: usize,
+        config: VectorIndexConfig,
+    ) -> Result<Self> {
         let db = Database::create(path.as_ref()).map_err(redb_database_err)?;
 
-        // Initialize tables and metadata.
+        // Initialize tables and metadata (including config for open() to reload).
         {
             let write_txn = db.begin_write()?;
             {
-                // Create tables by opening them.
                 let _vectors = write_txn.open_table(VECTORS_TABLE)?;
                 let mut meta = write_txn.open_table(METADATA_TABLE)?;
                 meta.insert("dimension", bincode::serialize(&dimension)?.as_slice())?;
                 meta.insert("count", bincode::serialize(&0usize)?.as_slice())?;
+                meta.insert("config", bincode::serialize(&config)?.as_slice())?;
             }
             write_txn.commit()?;
         }
 
         let hnsw = Hnsw::<f32, DistCosine>::new(
-            HNSW_MAX_NB_CONNECTION,
-            HNSW_INITIAL_CAPACITY,
+            config.m,
+            config.initial_capacity,
             16, // max_layer (auto-selected by hnsw_rs)
-            HNSW_EF_CONSTRUCTION,
+            config.ef_construction,
             DistCosine {},
         );
 
         Ok(Self {
             db,
             dimension,
+            config,
             hnsw,
             id_to_entity: Vec::new(),
         })
     }
 
     /// Open an existing vector index, rebuilding the HNSW graph from persisted vectors.
+    ///
+    /// If the index was created with a custom [`VectorIndexConfig`], those
+    /// parameters are restored automatically from the persisted metadata.
+    /// Indexes created before config persistence was added will use the
+    /// default config values.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let db = Database::open(path.as_ref()).map_err(redb_database_err)?;
 
-        let (dimension, vectors) = {
+        let (dimension, config, vectors) = {
             let read_txn = db.begin_read()?;
             let meta = read_txn.open_table(METADATA_TABLE)?;
 
@@ -211,6 +251,12 @@ impl VectorIndex {
                 .get("dimension")?
                 .ok_or_else(|| VectorError::Other("missing 'dimension' metadata".into()))?;
             let dimension: usize = bincode::deserialize(dim_bytes.value())?;
+
+            // Recover config; fall back to defaults for pre-config indexes.
+            let config: VectorIndexConfig = match meta.get("config")? {
+                Some(bytes) => bincode::deserialize(bytes.value())?,
+                None => VectorIndexConfig::default(),
+            };
 
             let vectors_table = read_txn.open_table(VECTORS_TABLE)?;
             let mut vectors: Vec<(Vec<u8>, Vec<f32>)> = Vec::new();
@@ -223,15 +269,15 @@ impl VectorIndex {
                 vectors.push((entity_id, vector));
             }
 
-            (dimension, vectors)
+            (dimension, config, vectors)
         };
 
-        let capacity = vectors.len().max(HNSW_INITIAL_CAPACITY);
+        let capacity = vectors.len().max(config.initial_capacity);
         let hnsw = Hnsw::<f32, DistCosine>::new(
-            HNSW_MAX_NB_CONNECTION,
+            config.m,
             capacity,
             16,
-            HNSW_EF_CONSTRUCTION,
+            config.ef_construction,
             DistCosine {},
         );
 
@@ -255,6 +301,7 @@ impl VectorIndex {
         Ok(Self {
             db,
             dimension,
+            config,
             hnsw,
             id_to_entity,
         })
@@ -301,7 +348,7 @@ impl VectorIndex {
             return Vec::new();
         }
 
-        let ef_search = k.max(HNSW_EF_CONSTRUCTION);
+        let ef_search = k.max(self.config.ef_construction);
         let neighbours = self.hnsw.search(query, k, ef_search);
 
         neighbours
@@ -363,6 +410,11 @@ impl VectorIndex {
     /// The vector dimension.
     pub fn dimension(&self) -> usize {
         self.dimension
+    }
+
+    /// The HNSW configuration used by this index.
+    pub fn config(&self) -> &VectorIndexConfig {
+        &self.config
     }
 }
 

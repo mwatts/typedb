@@ -32,6 +32,8 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Te
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_edge_cases;
 
 // ─── Public types ──────────────────────────────────────────────────
 

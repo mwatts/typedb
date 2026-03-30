@@ -6502,6 +6502,7 @@ version = "0.0.0"
 dependencies = [
  "bincode",
  "hnsw_rs",
+ "proptest",
  "redb",
  "serde",
  "tempfile",
