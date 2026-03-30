@@ -346,9 +346,6 @@ impl Files {
 
         #[cfg(windows)]
         {
-            // On Windows, FlushFileBuffers doesn't support directory handles, so it's likely
-            // a noop or an error (which is ignored), but we try it for symmetry.
-            // TODO: This requires additional testing and probably a separate OS-specific impl.
             if let Ok(dir) = StdFile::open(&self.directory) {
                 let _ = dir.sync_all();
             }
@@ -724,7 +721,7 @@ impl FsyncThread {
             context.files.write().unwrap().sync_all().expect("Expected sync all");
             while let Some(sender_opt) = vec.pop() {
                 if let Some(sender) = sender_opt {
-                    sender.send(()).unwrap();
+                    let _ = sender.send(());
                 }
             }
         }
