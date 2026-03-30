@@ -311,7 +311,11 @@ impl Files {
     }
 
     pub(crate) fn sync_all(&mut self) {
-        self.files.last_mut().unwrap().writer().unwrap().get_mut().sync_all().unwrap()
+        if let Some(file) = self.files.last_mut() {
+            if let Ok(mut writer) = file.writer() {
+                let _ = writer.get_mut().sync_all();
+            }
+        }
     }
 
     fn iter(&self) -> impl DoubleEndedIterator<Item = &File> {
@@ -632,10 +636,13 @@ impl FsyncThread {
         let vec_lock = context.signalling.get(current_signal as usize).unwrap().lock();
         let mut vec = vec_lock.unwrap();
         if !vec.is_empty() {
-            context.files.write().unwrap().sync_all();
+            // Gracefully handle poisoned lock (prior panic in another thread).
+            if let Ok(mut files) = context.files.write() {
+                files.sync_all();
+            }
             while let Some(sender_opt) = vec.pop() {
                 if let Some(sender) = sender_opt {
-                    sender.send(()).unwrap();
+                    let _ = sender.send(());
                 }
             }
         }
