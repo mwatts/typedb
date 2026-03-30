@@ -12,7 +12,8 @@ use std::{
 
 #[derive(Debug)]
 pub struct IntervalRunner {
-    shutdown_sink: SyncSender<SyncSender<()>>,
+    /// `None` when the runner is disabled (no background thread was spawned).
+    shutdown_sink: Option<SyncSender<SyncSender<()>>>,
 }
 
 impl IntervalRunner {
@@ -52,14 +53,49 @@ impl IntervalRunner {
                 }
             }
         });
-        Self { shutdown_sink: shutdown_sender }
+        Self { shutdown_sink: Some(shutdown_sender) }
+    }
+
+    /// Creates a disabled runner (no background thread). Useful when periodic
+    /// tasks should be skipped, e.g. in testing scenarios.
+    pub fn disabled() -> Self {
+        Self { shutdown_sink: None }
+    }
+
+    /// Creates a runner if `interval` is `Some`, otherwise returns a disabled runner.
+    pub fn maybe_new(interval: Option<Duration>, action: impl FnMut() + Send + 'static) -> Self {
+        match interval {
+            Some(interval) => Self::new(action, interval),
+            None => Self::disabled(),
+        }
+    }
+
+    /// Creates a runner with initial delay equal to the interval if `interval` is `Some`,
+    /// otherwise returns a disabled runner.
+    pub fn maybe_new_with_initial_delay(
+        interval: Option<Duration>,
+        action: impl FnMut() + Send + 'static,
+    ) -> Self {
+        match interval {
+            Some(interval) => Self::new_with_initial_delay(action, interval, interval),
+            None => Self::disabled(),
+        }
     }
 }
 
 impl Drop for IntervalRunner {
     fn drop(&mut self) {
+        let Some(ref shutdown_sink) = self.shutdown_sink else {
+            return;
+        };
         let (done_sender, done_receiver) = sync_channel(1);
-        self.shutdown_sink.send(done_sender).expect("Expected interval runner shutdown signal sending");
-        done_receiver.recv().expect("Expected interval runner shutdown finishing")
+        // The background thread may have panicked, dropping its receiver.
+        // In that case, send() fails — move on instead of panicking.
+        if shutdown_sink.send(done_sender).is_err() {
+            return;
+        }
+        // Give the thread a bounded amount of time to finish. If it's stuck or
+        // panicked after receiving the signal, we must not hang the caller.
+        let _ = done_receiver.recv_timeout(Duration::from_secs(5));
     }
 }
