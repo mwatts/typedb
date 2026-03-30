@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::VectorIndex;
+use crate::{VectorIndex, VectorIndexConfig};
 
 #[test]
 fn create_and_search() {
@@ -120,4 +120,63 @@ fn accessors() {
     index.insert(b"a", &[1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
     assert!(!index.is_empty());
     assert_eq!(index.len(), 1);
+}
+
+#[test]
+fn default_config_matches_legacy_constants() {
+    let cfg = VectorIndexConfig::default();
+    assert_eq!(cfg.m, 16);
+    assert_eq!(cfg.ef_construction, 200);
+    assert_eq!(cfg.initial_capacity, 1000);
+}
+
+#[test]
+fn create_with_custom_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = VectorIndexConfig {
+        m: 32,
+        ef_construction: 400,
+        initial_capacity: 500,
+    };
+    let mut index =
+        VectorIndex::create_with_config(dir.path().join("test.vdb"), 3, config).unwrap();
+
+    assert_eq!(*index.config(), config);
+
+    // Insert and search still work with custom params.
+    index.insert(b"a", &[1.0, 0.0, 0.0]).unwrap();
+    index.insert(b"b", &[0.9, 0.1, 0.0]).unwrap();
+    index.insert(b"c", &[0.0, 1.0, 0.0]).unwrap();
+    index.insert(b"d", &[0.0, 0.0, 1.0]).unwrap();
+    index.insert(b"e", &[0.5, 0.5, 0.0]).unwrap();
+
+    let results = index.search(&[1.0, 0.0, 0.0], 2);
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].entity_id, b"a");
+}
+
+#[test]
+fn config_persisted_across_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.vdb");
+
+    let config = VectorIndexConfig {
+        m: 8,
+        ef_construction: 100,
+        initial_capacity: 2000,
+    };
+
+    {
+        let mut index = VectorIndex::create_with_config(&path, 3, config).unwrap();
+        index.insert(b"entity1", &[1.0, 0.0, 0.0]).unwrap();
+        index.insert(b"entity2", &[0.0, 1.0, 0.0]).unwrap();
+    }
+
+    let reopened = VectorIndex::open(&path).unwrap();
+    assert_eq!(*reopened.config(), config);
+    assert_eq!(reopened.len(), 2);
+
+    // Search works after reopen with persisted config.
+    let results = reopened.search(&[1.0, 0.0, 0.0], 1);
+    assert_eq!(results[0].entity_id, b"entity1");
 }

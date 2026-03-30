@@ -281,4 +281,124 @@ pub mod tests {
         cache.remove("key2").unwrap();
         assert_eq!(get!(cache, "key2"), None);
     }
+
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_redb_spillover_insert_and_get() {
+        let (_tmp_dir, mut cache) = create_cache_in_tmpdir();
+        // memory_size_limit is 1, so key1 stays in memory, key2+key3 spill to disk
+        put!(cache, "key1", "value1");
+        put!(cache, "key2", "value2");
+        put!(cache, "key3", "value3");
+
+        // All items should be retrievable regardless of storage location
+        assert_eq!(get!(cache, "key1"), Some("value1"));
+        assert_eq!(get!(cache, "key2"), Some("value2"));
+        assert_eq!(get!(cache, "key3"), Some("value3"));
+
+        // Verify disk storage was actually initialized (not None)
+        assert!(
+            !matches!(cache.disk_storage, crate::DiskStorage::None),
+            "disk storage should have been initialized for spillover"
+        );
+    }
+
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_redb_spillover_remove() {
+        let (_tmp_dir, mut cache) = create_cache_in_tmpdir();
+        // key1 in memory, key2 spills to disk
+        put!(cache, "key1", "value1");
+        put!(cache, "key2", "value2");
+
+        // Remove the spilled item
+        cache.remove("key2").unwrap();
+        assert_eq!(get!(cache, "key2"), None);
+
+        // Memory item still intact
+        assert_eq!(get!(cache, "key1"), Some("value1"));
+
+        // Remove the in-memory item too
+        cache.remove("key1").unwrap();
+        assert_eq!(get!(cache, "key1"), None);
+    }
+
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_redb_spillover_boundary() {
+        let tmp_dir = create_tmp_dir();
+        // memory_size_limit = 2: exactly 2 items fit in memory
+        let mut cache: SpilloverCache<String> =
+            SpilloverCache::new(&tmp_dir.as_ref().to_path_buf(), Some("boundary_test"), 2);
+
+        // Fill memory exactly to limit
+        put!(cache, "key1", "value1");
+        put!(cache, "key2", "value2");
+
+        // Disk storage should NOT be initialized yet (no spillover)
+        assert!(
+            matches!(cache.disk_storage, crate::DiskStorage::None),
+            "disk storage should not be initialized when within memory limit"
+        );
+
+        // One more triggers spillover to disk
+        put!(cache, "key3", "value3");
+        assert!(
+            !matches!(cache.disk_storage, crate::DiskStorage::None),
+            "disk storage should be initialized after exceeding memory limit"
+        );
+
+        // All three items are retrievable
+        assert_eq!(get!(cache, "key1"), Some("value1"));
+        assert_eq!(get!(cache, "key2"), Some("value2"));
+        assert_eq!(get!(cache, "key3"), Some("value3"));
+    }
+
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_redb_cleanup_on_drop() {
+        let tmp_dir = create_tmp_dir();
+        let disk_storage_path;
+        {
+            let mut cache: SpilloverCache<String> =
+                SpilloverCache::new(&tmp_dir.as_ref().to_path_buf(), Some("drop_test"), 1);
+            put!(cache, "key1", "value1");
+            put!(cache, "key2", "value2"); // spills to disk
+
+            // Capture the path before dropping
+            disk_storage_path = cache.disk_storage_path.clone();
+            assert!(
+                disk_storage_path.exists(),
+                "redb database file should exist before drop"
+            );
+            // cache is dropped here
+        }
+
+        // After drop, the database file/directory should be cleaned up
+        assert!(
+            !disk_storage_path.exists(),
+            "redb database file should be cleaned up after drop"
+        );
+    }
+
+    #[test]
+    fn test_memory_only_fallback() {
+        // This test runs regardless of features — when no disk backend is selected
+        // (or when rocks/redb are present but the DiskStorage::None path is exercised),
+        // items beyond memory_size_limit are still stored in memory via the None fallback.
+        let tmp_dir = create_tmp_dir();
+        let mut cache: SpilloverCache<String> =
+            SpilloverCache::new(&tmp_dir.as_ref().to_path_buf(), Some("memonly_test"), 1);
+
+        put!(cache, "key1", "value1");
+
+        // If a disk backend is available, it will be used for spillover.
+        // If not, DiskStorage::None stores in memory regardless of limit.
+        put!(cache, "key2", "value2");
+        put!(cache, "key3", "value3");
+
+        assert_eq!(get!(cache, "key1"), Some("value1"));
+        assert_eq!(get!(cache, "key2"), Some("value2"));
+        assert_eq!(get!(cache, "key3"), Some("value3"));
+    }
 }
