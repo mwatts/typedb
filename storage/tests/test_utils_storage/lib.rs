@@ -8,7 +8,7 @@ use std::{path::Path, sync::Arc};
 
 use durability::wal::WAL;
 use kv::keyspaces::KeyspaceSet;
-use storage::{durability_client::WALClient, recovery::checkpoint::Checkpoint, MVCCStorage, StorageOpenError};
+use storage::{durability_client::WALClient, recovery::checkpoint::{CheckpointReader, CheckpointWriter}, MVCCStorage, StorageOpenError};
 
 pub mod mock_snapshot;
 
