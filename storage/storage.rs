@@ -138,7 +138,7 @@ impl<Durability> MVCCStorage<Durability> {
         name: impl AsRef<str>,
         path: &Path,
         durability_client: Durability,
-        checkpoint: &Option<Checkpoint>,
+        checkpoint: &Option<CheckpointReader>,
     ) -> Result<Self, StorageOpenError>
     where
         Durability: DurabilityClient,
@@ -150,7 +150,7 @@ impl<Durability> MVCCStorage<Durability> {
         name: impl AsRef<str>,
         path: &Path,
         mut durability_client: Durability,
-        checkpoint: &Option<Checkpoint>,
+        checkpoint: &Option<CheckpointReader>,
         backend: KVBackend,
     ) -> Result<Self, StorageOpenError>
     where
@@ -170,17 +170,17 @@ impl<Durability> MVCCStorage<Durability> {
                     .map_err(|err| StorageDirectoryRecreate { name: name.to_owned(), source: Arc::new(err) })?;
                 let keyspaces = Self::create_keyspaces::<KS>(name, &storage_dir, backend)?;
                 trace!("No checkpoint found, loading from WAL");
-                let commits = load_commit_data_from(SequenceNumber::MIN.next(), &durability_client, usize::MAX)
+                let commits = load_commit_data_from(SequenceNumber::MIN.next(), &durability_client)
                     .map_err(|err| RecoverFromDurability { name: name.to_owned(), typedb_source: err })?;
                 let next_sequence_number = commits.keys().max().cloned().unwrap_or(SequenceNumber::MIN).next();
-                apply_recovered(commits, &durability_client, &keyspaces)
+                apply_recovered(name, commits, &durability_client, &keyspaces)
                     .map_err(|err| RecoverFromDurability { name: name.to_owned(), typedb_source: err })?;
                 trace!("Finished applying commits from WAL.");
                 (keyspaces, next_sequence_number)
             }
             Some(checkpoint) => {
                 checkpoint
-                    .recover_storage::<KS, _>(name, &storage_dir, &durability_client, backend)
+                    .recover_storage::<KS, _>(name, &storage_dir, &durability_client)
                     .map_err(|error| RecoverFromCheckpoint { name: name.to_owned(), typedb_source: error })?
             }
         };

@@ -51,73 +51,9 @@ impl CheckpointReader {
             return Ok(None);
         }
 
-        let current_checkpoint_dir = checkpoint_dir.join(format!("{}", Utc::now().timestamp_micros()));
-        fs::create_dir_all(&current_checkpoint_dir)
-            .map_err(|error| CheckpointDirCreate { dir: checkpoint_dir.clone(), source: Arc::new(error) })?;
-
-        Ok(Checkpoint { directory: current_checkpoint_dir })
-    }
-
-    pub fn add_storage(&self, keyspaces: &Keyspaces, watermark: SequenceNumber) -> Result<(), CheckpointCreateError> {
-        use CheckpointCreateError::{KeyspaceCheckpoint, MetadataFileCreate, MetadataWrite};
-        keyspaces
-            .checkpoint(&self.directory)
-            .map_err(|error| KeyspaceCheckpoint { dir: self.directory.clone(), typedb_source: error })?;
-
-        let metadata_file_path = self.directory.join(Self::STORAGE_METADATA_FILE_NAME);
-        let mut metadata_file = File::create(&metadata_file_path)
-            .map_err(|error| MetadataFileCreate { file_path: metadata_file_path.clone(), source: Arc::new(error) })?;
-        metadata_file
-            .write_all(watermark.number().to_string().as_bytes())
-            .and_then(|()| metadata_file.sync_all())
-            .map_err(|error| MetadataWrite { file_path: metadata_file_path.clone(), source: Arc::new(error) })?;
-        Ok(())
-    }
-
-    pub fn add_extension<T: CheckpointAdditionalData>(&self, data: &T) -> Result<(), CheckpointCreateError> {
-        use CheckpointCreateError::{ExtensionDuplicate, ExtensionIO, ExtensionSerialise};
-        let file_name = T::NAME;
-        let path = self.directory.join(file_name);
-        if path.exists() {
-            return Err(ExtensionDuplicate { name: T::NAME.to_string() });
-        }
-
-        let mut file =
-            File::create(path).map_err(|err| ExtensionIO { name: T::NAME.to_string(), source: Arc::new(err) })?;
-
-        data.serialise_into(&mut file)
-            .map_err(|err| ExtensionSerialise { name: T::NAME.to_string(), source: Arc::new(err) })?;
-
-        Ok(())
-    }
-
-    pub fn finish(&self) -> Result<(), CheckpointCreateError> {
-        use CheckpointCreateError::{CheckpointDirRead, MissingStorageData, OldCheckpointRemove};
-
-        if !self.directory.join(Self::STORAGE_METADATA_FILE_NAME).exists() {
-            return Err(MissingStorageData { dir: self.directory.clone() });
-        }
-
-        let previous_checkpoints: Vec<_> = fs::read_dir(self.directory.parent().unwrap())
-            .and_then(|entries| {
-                entries
-                    .map_ok(|entry| entry.path())
-                    .filter(|path| path.is_ok() && path.as_ref().unwrap() != &self.directory)
-                    .try_collect()
-            })
-            .map_err(|error| CheckpointDirRead { dir: self.directory.clone(), source: Arc::new(error) })?;
-
-        for previous_checkpoint in previous_checkpoints {
-            fs::remove_dir_all(&previous_checkpoint)
-                .map_err(|error| OldCheckpointRemove { dir: previous_checkpoint, source: Arc::new(error) })?
-        }
-
-        Ok(())
-    }
-
-    pub fn open_latest(storage_path: &Path) -> Result<Option<Self>, CheckpointLoadError> {
-        let checkpoint_dir = storage_path.join(Self::CHECKPOINT_DIR_NAME);
-        find_latest_checkpoint(&checkpoint_dir).map(|path| path.map(|p| Checkpoint { directory: p }))
+        fs::read_dir(&checkpoint_dir)
+            .and_then(latest_complete_checkpoint::<KS>)
+            .map_err(|error| CheckpointRead { dir: checkpoint_dir, source: Arc::new(error) })
     }
 
     pub fn get_additional_data<T: CheckpointAdditionalData>(&self) -> Result<T, CheckpointLoadError> {
@@ -337,7 +273,7 @@ impl CheckpointWriter {
 
         keyspaces
             .checkpoint(&self.temporary_directory)
-            .map_err(|error| KeyspaceCheckpoint { dir: self.temporary_directory.clone(), source: error })?;
+            .map_err(|error| KeyspaceCheckpoint { dir: self.temporary_directory.clone(), typedb_source: error })?;
 
         fail_point!(CHECKPOINT_METADATA_WRITE_FAIL);
 

@@ -39,7 +39,7 @@ use storage::{
     isolation_manager::CommitType,
     iterator::MVCCReadError,
     key_value::{StorageKeyArray, StorageKeyReference},
-    recovery::commit_recovery::{load_commit_data_from, RecoveryCommitStatus, StorageRecoveryError},
+    recovery::commit_recovery::{load_commit_data_from, load_commit_data_from_with_context, RecoveryCommitStatus, StorageRecoveryError},
     sequence_number::SequenceNumber,
     snapshot::{buffer::OperationsBuffer, write::Write},
     MVCCStorage,

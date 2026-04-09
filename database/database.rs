@@ -319,13 +319,13 @@ impl Database<WALClient> {
         );
 
         let schema = Arc::new(RwLock::new(Schema { thing_statistics, type_cache, function_cache }));
-        let schema_txn_lock = Arc::new(RwLock::default());
+        let schema_txn_lock: Arc<RwLock<()>> = Arc::new(RwLock::default());
 
         let query_cache = Arc::new(QueryCache::new());
         let shutdown = Arc::new(AtomicBool::new(false));
         let update_statistics =
-            make_update_statistics_fn(storage.clone(), schema.clone(), schema_txn_lock.clone(), query_cache.clone(), shutdown.clone());
-        let checkpoint_fn = make_checkpoint_fn(path.to_owned(), SequenceNumber::MIN, storage.clone(), shutdown.clone());
+            make_update_statistics_fn(name.to_owned(), storage.clone(), schema.clone(), schema_txn_lock.clone(), query_cache.clone(), shutdown.clone());
+        let checkpoint_fn = make_checkpoint_fn(name.to_owned(), path.to_owned(), SequenceNumber::MIN, storage.clone(), shutdown.clone());
 
         Ok(Database::<WALClient> {
             name: name.to_owned(),
@@ -425,7 +425,7 @@ impl Database<WALClient> {
         );
 
         let schema = Arc::new(RwLock::new(Schema { thing_statistics, type_cache, function_cache }));
-        let schema_txn_lock = Arc::new(RwLock::default());
+        let schema_txn_lock: Arc<RwLock<()>> = Arc::new(RwLock::default());
 
         let checkpoint_sequence_number = match checkpoint {
             None => SequenceNumber::MIN,
@@ -437,8 +437,8 @@ impl Database<WALClient> {
         let query_cache = Arc::new(QueryCache::new());
         let shutdown = Arc::new(AtomicBool::new(false));
         let update_statistics =
-            make_update_statistics_fn(storage.clone(), schema.clone(), schema_txn_lock.clone(), query_cache.clone(), shutdown.clone());
-        let checkpoint_fn = make_checkpoint_fn(path.to_owned(), checkpoint_sequence_number, storage.clone(), shutdown.clone());
+            make_update_statistics_fn(name.to_owned(), storage.clone(), schema.clone(), schema_txn_lock.clone(), query_cache.clone(), shutdown.clone());
+        let checkpoint_fn = make_checkpoint_fn(name.to_owned(), path.to_owned(), checkpoint_sequence_number, storage.clone(), shutdown.clone());
 
         let database = Database::<WALClient> {
             name: name.to_owned(),
@@ -561,7 +561,7 @@ fn make_checkpoint_fn(
         }
         let watermark = storage.snapshot_watermark();
         if prev_checkpoint < watermark {
-            match Checkpoint::new(&path).and_then(|checkpoint| {
+            match CheckpointWriter::new(&path).and_then(|checkpoint| {
                 storage.checkpoint(&checkpoint)?;
                 checkpoint.finish()?;
                 Ok(())
