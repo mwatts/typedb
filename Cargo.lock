@@ -1343,6 +1343,7 @@ dependencies = [
  "encoding",
  "error",
  "executor",
+ "fail_point",
  "function",
  "ir",
  "itertools 0.10.5",
@@ -1472,6 +1473,7 @@ dependencies = [
  "criterion",
  "durability_test_common",
  "error",
+ "fail_point",
  "itertools 0.10.5",
  "logger",
  "lz4_flex",
@@ -1687,6 +1689,15 @@ dependencies = [
  "tracing",
  "typeql",
  "unicase",
+]
+
+[[package]]
+name = "fail_point"
+version = "0.0.0"
+dependencies = [
+ "itertools 0.10.5",
+ "rand 0.8.5",
+ "tracing",
 ]
 
 [[package]]
@@ -5163,6 +5174,7 @@ dependencies = [
  "database",
  "durability",
  "error",
+ "fail_point",
  "itertools 0.10.5",
  "kv",
  "lending_iterator",
@@ -6082,7 +6094,7 @@ dependencies = [
 [[package]]
 name = "typedb-protocol"
 version = "0.0.0"
-source = "git+https://github.com/typedb/typedb-protocol?tag=3.7.0#3b75931f30f2b5cecf192515bb95071cd98a6e10"
+source = "git+https://github.com/typedb/typedb-protocol?rev=e4567406bdc993722554717563ffc1ac9ce0a678#e4567406bdc993722554717563ffc1ac9ce0a678"
 dependencies = [
  "prost",
  "tonic",
@@ -6097,6 +6109,7 @@ dependencies = [
  "clap",
  "database",
  "executor",
+ "fail_point",
  "function",
  "http_steps",
  "lending_iterator",
@@ -6110,6 +6123,7 @@ dependencies = [
  "storage",
  "test_utils",
  "tokio",
+ "tracing",
  "typeql",
 ]
 
@@ -6122,7 +6136,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "typeql"
 version = "0.0.0"
-source = "git+https://github.com/typedb/typeql?tag=3.8.0#6449dadbd75fe0c9d11294aa83c0bb2f64a29b1a"
+source = "git+https://github.com/mwatts/typeql?branch=thyra#cc43d26376c96f5db6b8d3ee58de70b17ab31fed"
 dependencies = [
  "chrono",
  "itertools 0.10.5",
