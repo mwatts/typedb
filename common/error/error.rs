@@ -418,3 +418,198 @@ macro_rules! needs_update_when_feature_is_implemented {
     ($feature:ident) => {};
     ($feature:ident, $msg:literal) => {};
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    typedb_error! {
+        TestError(component = "Test", prefix = "TST") {
+            SimpleError(1, "A simple error occurred."),
+            ErrorWithValue(2, "Error for value '{value}'.", value: String),
+            ErrorWithSource(3, "Error with source.", typedb_source: Box<TestError>),
+        }
+    }
+
+    #[test]
+    fn simple_error_code() {
+        let err = TestError::SimpleError {};
+        assert_eq!(err.code(), "TST1");
+    }
+
+    #[test]
+    fn simple_error_component() {
+        let err = TestError::SimpleError {};
+        assert_eq!(err.component(), "Test");
+    }
+
+    #[test]
+    fn simple_error_code_prefix() {
+        let err = TestError::SimpleError {};
+        assert_eq!(err.code_prefix(), "TST");
+    }
+
+    #[test]
+    fn simple_error_code_number() {
+        let err = TestError::SimpleError {};
+        assert_eq!(err.code_number(), 1);
+    }
+
+    #[test]
+    fn simple_error_variant_name() {
+        let err = TestError::SimpleError {};
+        assert_eq!(err.variant_name(), "SimpleError");
+    }
+
+    #[test]
+    fn simple_error_format_description() {
+        let err = TestError::SimpleError {};
+        assert_eq!(err.format_description(), "A simple error occurred.");
+    }
+
+    #[test]
+    fn error_with_value_format_description() {
+        let err = TestError::ErrorWithValue { value: "test_val".to_string() };
+        assert_eq!(err.format_description(), "Error for value 'test_val'.");
+    }
+
+    #[test]
+    fn error_with_value_code() {
+        let err = TestError::ErrorWithValue { value: "x".to_string() };
+        assert_eq!(err.code(), "TST2");
+        assert_eq!(err.code_number(), 2);
+    }
+
+    #[test]
+    fn simple_error_has_no_source() {
+        let err = TestError::SimpleError {};
+        assert!(err.source_error().is_none());
+        assert!(err.source_typedb_error().is_none());
+    }
+
+    #[test]
+    fn error_with_typedb_source() {
+        let inner = TestError::SimpleError {};
+        let outer = TestError::ErrorWithSource { typedb_source: Box::new(inner) };
+        assert!(outer.source_typedb_error().is_some());
+        let source = outer.source_typedb_error().unwrap();
+        assert_eq!(source.code(), "TST1");
+    }
+
+    #[test]
+    fn format_code_and_description_no_query() {
+        let err = TestError::SimpleError {};
+        let formatted = err.format_code_and_description();
+        assert_eq!(formatted, "[TST1] A simple error occurred.");
+    }
+
+    #[test]
+    fn source_query_returns_none_for_simple_error() {
+        let err = TestError::SimpleError {};
+        assert!(err.source_query().is_none());
+    }
+
+    #[test]
+    fn source_span_returns_none_for_simple_error() {
+        let err = TestError::SimpleError {};
+        assert!(err.source_span().is_none());
+    }
+
+    #[test]
+    fn stack_trace_single_error() {
+        let err = TestError::SimpleError {};
+        let trace = err.stack_trace();
+        assert_eq!(trace.len(), 1);
+        assert_eq!(trace[0], "[TST1] A simple error occurred.");
+    }
+
+    #[test]
+    fn stack_trace_with_source() {
+        let inner = TestError::SimpleError {};
+        let outer = TestError::ErrorWithSource { typedb_source: Box::new(inner) };
+        let trace = outer.stack_trace();
+        assert_eq!(trace.len(), 2);
+        // Stack trace is reversed: root cause first
+        assert_eq!(trace[0], "[TST1] A simple error occurred.");
+        assert_eq!(trace[1], "[TST3] Error with source.");
+    }
+
+    #[test]
+    fn root_source_typedb_error_single() {
+        let err = TestError::SimpleError {};
+        let root = err.root_source_typedb_error();
+        assert_eq!(root.code(), "TST1");
+    }
+
+    #[test]
+    fn root_source_typedb_error_nested() {
+        let inner = TestError::SimpleError {};
+        let outer = TestError::ErrorWithSource { typedb_source: Box::new(inner) };
+        let root = outer.root_source_typedb_error();
+        assert_eq!(root.code(), "TST1");
+    }
+
+    #[test]
+    fn box_delegates_all_methods() {
+        let err = Box::new(TestError::ErrorWithValue { value: "boxed".to_string() });
+        assert_eq!(err.code(), "TST2");
+        assert_eq!(err.component(), "Test");
+        assert_eq!(err.code_prefix(), "TST");
+        assert_eq!(err.code_number(), 2);
+        assert_eq!(err.variant_name(), "ErrorWithValue");
+        assert_eq!(err.format_description(), "Error for value 'boxed'.");
+    }
+
+    #[test]
+    fn typedb_error_equality_by_code() {
+        let a = TestError::SimpleError {};
+        let b = TestError::SimpleError {};
+        let a_ref: &dyn TypeDBError = &a;
+        let b_ref: &dyn TypeDBError = &b;
+        assert!(a_ref == b_ref);
+    }
+
+    #[test]
+    fn typedb_error_inequality_different_codes() {
+        let a = TestError::SimpleError {};
+        let b = TestError::ErrorWithValue { value: "x".to_string() };
+        let a_ref: &dyn TypeDBError = &a;
+        let b_ref: &dyn TypeDBError = &b;
+        assert!(a_ref != b_ref);
+    }
+
+    #[test]
+    fn display_without_source() {
+        let err = TestError::SimpleError {};
+        let display = format!("{}", &err as &dyn TypeDBError);
+        assert!(display.contains("[TST1]"));
+        assert!(display.contains("A simple error occurred."));
+        assert!(!display.contains("Cause"));
+    }
+
+    #[test]
+    fn display_with_source() {
+        let inner = TestError::SimpleError {};
+        let outer = TestError::ErrorWithSource { typedb_source: Box::new(inner) };
+        let display = format!("{}", &outer as &dyn TypeDBError);
+        assert!(display.contains("[TST3]"));
+        assert!(display.contains("Cause"));
+        assert!(display.contains("[TST1]"));
+    }
+
+    #[test]
+    fn debug_matches_display() {
+        let err = TestError::SimpleError {};
+        let debug = format!("{:?}", &err as &dyn TypeDBError);
+        let display = format!("{}", &err as &dyn TypeDBError);
+        assert_eq!(debug, display);
+    }
+
+    #[test]
+    fn clone_preserves_error() {
+        let err = TestError::ErrorWithValue { value: "cloned".to_string() };
+        let cloned = err.clone();
+        assert_eq!(cloned.code(), "TST2");
+        assert_eq!(cloned.format_description(), "Error for value 'cloned'.");
+    }
+}

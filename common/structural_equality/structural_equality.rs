@@ -233,3 +233,262 @@ macro_rules! tuple_structural_equality {
 
 tuple_structural_equality! { T, U }
 tuple_structural_equality! { T, U, V }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    use super::*;
+
+    // --- Primitive types ---
+
+    #[test]
+    fn bool_hash_and_equality() {
+        assert_eq!(StructuralEquality::hash(&true), 1);
+        assert_eq!(StructuralEquality::hash(&false), 0);
+        assert!(StructuralEquality::equals(&true, &true));
+        assert!(StructuralEquality::equals(&false, &false));
+        assert!(!StructuralEquality::equals(&true, &false));
+    }
+
+    #[test]
+    fn u64_hash_is_identity() {
+        assert_eq!(StructuralEquality::hash(&42u64), 42);
+        assert!(StructuralEquality::equals(&42u64, &42u64));
+        assert!(!StructuralEquality::equals(&42u64, &43u64));
+    }
+
+    #[test]
+    fn usize_hash_and_equality() {
+        assert!(StructuralEquality::equals(&10usize, &10usize));
+        assert!(!StructuralEquality::equals(&10usize, &20usize));
+    }
+
+    // --- is_structurally_equivalent ---
+
+    #[test]
+    fn is_structurally_equivalent_matching() {
+        assert!(is_structurally_equivalent(&42u64, &42u64));
+    }
+
+    #[test]
+    fn is_structurally_equivalent_different() {
+        assert!(!is_structurally_equivalent(&42u64, &43u64));
+    }
+
+    // --- ordered_hash_combine ---
+
+    #[test]
+    fn ordered_hash_combine_is_order_dependent() {
+        let ab = ordered_hash_combine(1, 2);
+        let ba = ordered_hash_combine(2, 1);
+        assert_ne!(ab, ba);
+    }
+
+    #[test]
+    fn ordered_hash_combine_different_inputs_different_results() {
+        let a = ordered_hash_combine(100, 200);
+        let b = ordered_hash_combine(100, 201);
+        assert_ne!(a, b);
+    }
+
+    // --- Vec / Slice ---
+
+    #[test]
+    fn vec_equality() {
+        let a: Vec<u64> = vec![1, 2, 3];
+        let b: Vec<u64> = vec![1, 2, 3];
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn vec_inequality_different_content() {
+        let a: Vec<u64> = vec![1, 2, 3];
+        let b: Vec<u64> = vec![1, 2, 4];
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    #[test]
+    fn vec_inequality_different_length() {
+        let a: Vec<u64> = vec![1, 2];
+        let b: Vec<u64> = vec![1, 2, 3];
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    #[test]
+    fn empty_vecs_equal() {
+        let a: Vec<u64> = vec![];
+        let b: Vec<u64> = vec![];
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    // --- HashSet ---
+
+    #[test]
+    fn hashset_equality_order_independent() {
+        let a: HashSet<u64> = [1, 2, 3].into();
+        let b: HashSet<u64> = [3, 1, 2].into();
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn hashset_inequality_different_content() {
+        let a: HashSet<u64> = [1, 2, 3].into();
+        let b: HashSet<u64> = [1, 2, 4].into();
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    #[test]
+    fn hashset_inequality_different_size() {
+        let a: HashSet<u64> = [1, 2].into();
+        let b: HashSet<u64> = [1, 2, 3].into();
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    // --- BTreeMap ---
+
+    #[test]
+    fn btreemap_equality() {
+        let a: BTreeMap<u64, u64> = [(1, 10), (2, 20)].into();
+        let b: BTreeMap<u64, u64> = [(2, 20), (1, 10)].into();
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn btreemap_inequality_different_values() {
+        let a: BTreeMap<u64, u64> = [(1, 10)].into();
+        let b: BTreeMap<u64, u64> = [(1, 11)].into();
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    #[test]
+    fn btreemap_inequality_different_size() {
+        let a: BTreeMap<u64, u64> = [(1, 10)].into();
+        let b: BTreeMap<u64, u64> = [(1, 10), (2, 20)].into();
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    // --- HashMap ---
+
+    #[test]
+    fn hashmap_equality() {
+        let a: HashMap<u64, u64> = [(1, 10), (2, 20)].into_iter().collect();
+        let b: HashMap<u64, u64> = [(2, 20), (1, 10)].into_iter().collect();
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn hashmap_inequality_different_values() {
+        let a: HashMap<u64, u64> = [(1, 10)].into_iter().collect();
+        let b: HashMap<u64, u64> = [(1, 11)].into_iter().collect();
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    // --- Option ---
+
+    #[test]
+    fn option_none_equals_none() {
+        let a: Option<u64> = None;
+        let b: Option<u64> = None;
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn option_some_equals_some() {
+        let a = Some(42u64);
+        let b = Some(42u64);
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn option_some_not_equals_none() {
+        let a = Some(42u64);
+        let b: Option<u64> = None;
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    #[test]
+    fn option_none_not_equals_some() {
+        let a: Option<u64> = None;
+        let b = Some(42u64);
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    // --- str ---
+
+    #[test]
+    fn str_equality() {
+        assert!(StructuralEquality::equals("hello", "hello"));
+        assert!(!StructuralEquality::equals("hello", "world"));
+    }
+
+    #[test]
+    fn str_hash_consistency() {
+        let h1 = StructuralEquality::hash("hello");
+        let h2 = StructuralEquality::hash("hello");
+        assert_eq!(h1, h2);
+    }
+
+    // --- Reference ---
+
+    #[test]
+    fn reference_delegates_to_inner() {
+        let a = 42u64;
+        let b = 42u64;
+        assert!(StructuralEquality::equals(&&a, &&b));
+        assert_eq!(StructuralEquality::hash(&&a), StructuralEquality::hash(&&b));
+    }
+
+    // --- Tuples ---
+
+    #[test]
+    fn tuple2_equality() {
+        let a = (1u64, 2u64);
+        let b = (1u64, 2u64);
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn tuple2_inequality() {
+        let a = (1u64, 2u64);
+        let b = (1u64, 3u64);
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    #[test]
+    fn tuple3_equality() {
+        let a = (1u64, 2u64, 3u64);
+        let b = (1u64, 2u64, 3u64);
+        assert!(StructuralEquality::equals(&a, &b));
+        assert_eq!(StructuralEquality::hash(&a), StructuralEquality::hash(&b));
+    }
+
+    #[test]
+    fn tuple3_inequality() {
+        let a = (1u64, 2u64, 3u64);
+        let b = (1u64, 2u64, 4u64);
+        assert!(!StructuralEquality::equals(&a, &b));
+    }
+
+    // --- hash_into ---
+
+    #[test]
+    fn hash_into_writes_hash_value() {
+        let val = 42u64;
+        let mut hasher = DefaultHasher::new();
+        StructuralEquality::hash_into(&val, &mut hasher);
+        let result = hasher.finish();
+        // hash_into should write the structural hash (42) into the hasher
+        let mut expected_hasher = DefaultHasher::new();
+        expected_hasher.write_u64(42);
+        assert_eq!(result, expected_hasher.finish());
+    }
+}

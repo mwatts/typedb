@@ -851,3 +851,390 @@ struct SizeInfo {
     pub total: u64,
     pub available: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ClientEndpoint ---
+
+    #[test]
+    fn client_endpoint_display() {
+        assert_eq!(format!("{}", ClientEndpoint::Grpc), "grpc");
+        assert_eq!(format!("{}", ClientEndpoint::Http), "http");
+    }
+
+    #[test]
+    fn client_endpoint_serde_roundtrip() {
+        let json = serde_json::to_string(&ClientEndpoint::Grpc).unwrap();
+        assert_eq!(json, "\"grpc\"");
+        let deserialized: ClientEndpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ClientEndpoint::Grpc);
+
+        let json = serde_json::to_string(&ClientEndpoint::Http).unwrap();
+        assert_eq!(json, "\"http\"");
+        let deserialized: ClientEndpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ClientEndpoint::Http);
+    }
+
+    #[test]
+    fn all_client_endpoints_complete() {
+        assert_eq!(ALL_CLIENT_ENDPOINTS.len(), 2);
+        assert!(ALL_CLIENT_ENDPOINTS.contains(&ClientEndpoint::Grpc));
+        assert!(ALL_CLIENT_ENDPOINTS.contains(&ClientEndpoint::Http));
+    }
+
+    // --- ServerProperties ---
+
+    #[test]
+    fn server_properties_accessors() {
+        let props = ServerProperties::new(
+            "deploy-123".to_string(),
+            "server-456".to_string(),
+            "TypeDB".to_string(),
+            true,
+        );
+        assert_eq!(props.deployment_id(), "deploy-123");
+        assert_eq!(props.server_id(), "server-456");
+        assert!(props.is_reporting_enabled());
+    }
+
+    #[test]
+    fn server_properties_to_state_report() {
+        let props = ServerProperties::new(
+            "deploy-123".to_string(),
+            "server-456".to_string(),
+            "TypeDB".to_string(),
+            false,
+        );
+        let report = props.to_state_report();
+        assert_eq!(report.deployment_id, "deploy-123");
+        assert_eq!(report.server_id, "server-456");
+        assert_eq!(report.distribution, "TypeDB");
+        assert!(!report.enabled);
+    }
+
+    // --- LoadMetrics ---
+
+    #[test]
+    fn load_metrics_initial_state() {
+        let metrics = LoadMetrics::new();
+        assert!(!metrics.is_deleted);
+    }
+
+    #[test]
+    fn load_metrics_set_schema() {
+        let mut metrics = LoadMetrics::new();
+        metrics.set_schema(SchemaLoadMetrics { type_count: 42 });
+        assert_eq!(metrics.schema.type_count, 42);
+    }
+
+    #[test]
+    fn load_metrics_set_data() {
+        let mut metrics = LoadMetrics::new();
+        metrics.set_data(DataLoadMetrics {
+            entity_count: 10,
+            relation_count: 5,
+            attribute_count: 20,
+            has_count: 15,
+            role_count: 3,
+            storage_in_bytes: 1024,
+            storage_key_count: 100,
+        });
+        assert_eq!(metrics.data.entity_count, 10);
+        assert_eq!(metrics.data.relation_count, 5);
+        assert_eq!(metrics.data.attribute_count, 20);
+        assert_eq!(metrics.data.has_count, 15);
+        assert_eq!(metrics.data.role_count, 3);
+        assert_eq!(metrics.data.storage_in_bytes, 1024);
+        assert_eq!(metrics.data.storage_key_count, 100);
+    }
+
+    #[test]
+    fn load_metrics_mark_deleted() {
+        let mut metrics = LoadMetrics::new();
+        metrics.mark_deleted();
+        assert!(metrics.is_deleted);
+    }
+
+    #[test]
+    fn load_metrics_set_clears_deleted() {
+        let mut metrics = LoadMetrics::new();
+        metrics.mark_deleted();
+        assert!(metrics.is_deleted);
+        metrics.set_schema(SchemaLoadMetrics { type_count: 1 });
+        assert!(!metrics.is_deleted);
+    }
+
+    // --- ConnectionLoadMetrics ---
+
+    #[test]
+    fn connection_load_metrics_new_is_empty() {
+        let metrics = ConnectionLoadMetrics::new();
+        assert!(metrics.is_empty());
+    }
+
+    #[test]
+    fn connection_load_metrics_increment_and_decrement() {
+        let metrics = ConnectionLoadMetrics::new();
+        metrics.increment_count(ClientEndpoint::Grpc, LoadKind::ReadTransactions);
+        assert!(!metrics.is_empty());
+        metrics.decrement_count(ClientEndpoint::Grpc, LoadKind::ReadTransactions);
+    }
+
+    #[test]
+    fn connection_load_metrics_peak_tracking() {
+        let metrics = ConnectionLoadMetrics::new();
+        metrics.increment_count(ClientEndpoint::Http, LoadKind::WriteTransactions);
+        metrics.increment_count(ClientEndpoint::Http, LoadKind::WriteTransactions);
+        metrics.increment_count(ClientEndpoint::Http, LoadKind::WriteTransactions);
+        metrics.decrement_count(ClientEndpoint::Http, LoadKind::WriteTransactions);
+        metrics.decrement_count(ClientEndpoint::Http, LoadKind::WriteTransactions);
+        // Peak should be 3, current should be 1
+        let report = metrics.to_peak_report();
+        let http_peaks = report.get(&ClientEndpoint::Http).unwrap();
+        assert_eq!(*http_peaks.get(&LoadKind::WriteTransactions).unwrap(), 3);
+    }
+
+    #[test]
+    fn connection_load_metrics_snapshot_and_restore() {
+        let metrics = ConnectionLoadMetrics::new();
+        metrics.increment_count(ClientEndpoint::Grpc, LoadKind::SchemaTransactions);
+        metrics.increment_count(ClientEndpoint::Grpc, LoadKind::SchemaTransactions);
+        metrics.take_snapshot();
+        // After snapshot, peak should reset to current
+        metrics.increment_count(ClientEndpoint::Grpc, LoadKind::SchemaTransactions);
+        let report = metrics.to_peak_report();
+        let grpc_peaks = report.get(&ClientEndpoint::Grpc).unwrap();
+        assert_eq!(*grpc_peaks.get(&LoadKind::SchemaTransactions).unwrap(), 3);
+
+        metrics.restore_snapshot();
+        let report = metrics.to_peak_report();
+        let grpc_peaks = report.get(&ClientEndpoint::Grpc).unwrap();
+        assert_eq!(*grpc_peaks.get(&LoadKind::SchemaTransactions).unwrap(), 2);
+    }
+
+    // --- ActionMetrics ---
+
+    #[test]
+    fn action_metrics_initial_zero() {
+        let metrics = ActionMetrics::new();
+        let reports = metrics.to_state_reports(&None);
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn action_metrics_submit_success() {
+        let metrics = ActionMetrics::new();
+        metrics.submit_success(ActionKind::ConnectionOpen);
+        metrics.submit_success(ActionKind::ConnectionOpen);
+        assert_eq!(metrics.get_successful(&ActionKind::ConnectionOpen), 2);
+        assert_eq!(metrics.get_failed(&ActionKind::ConnectionOpen), 0);
+        assert_eq!(metrics.get_attempted(&ActionKind::ConnectionOpen), 2);
+    }
+
+    #[test]
+    fn action_metrics_submit_fail() {
+        let metrics = ActionMetrics::new();
+        metrics.submit_fail(ActionKind::SignIn);
+        assert_eq!(metrics.get_successful(&ActionKind::SignIn), 0);
+        assert_eq!(metrics.get_failed(&ActionKind::SignIn), 1);
+        assert_eq!(metrics.get_attempted(&ActionKind::SignIn), 1);
+    }
+
+    #[test]
+    fn action_metrics_snapshot_and_diff() {
+        let mut metrics = ActionMetrics::new();
+        metrics.submit_success(ActionKind::DatabasesCreate);
+        metrics.submit_success(ActionKind::DatabasesCreate);
+        metrics.take_snapshot();
+        metrics.submit_success(ActionKind::DatabasesCreate);
+        let diff = metrics.to_diff_reports(None);
+        let create_diff = diff.iter().find(|r| r.kind == ActionKind::DatabasesCreate).unwrap();
+        assert_eq!(create_diff.successful, 1); // Only 1 since snapshot
+    }
+
+    #[test]
+    fn action_metrics_restore_snapshot() {
+        let mut metrics = ActionMetrics::new();
+        metrics.submit_success(ActionKind::TransactionQuery);
+        metrics.take_snapshot();
+        metrics.submit_success(ActionKind::TransactionQuery);
+        metrics.submit_success(ActionKind::TransactionQuery);
+        metrics.restore_snapshot();
+        let diff = metrics.to_diff_reports(None);
+        let query_diff = diff.iter().find(|r| r.kind == ActionKind::TransactionQuery);
+        // After restore, diff should be from original snapshot (0) to current (3)
+        assert!(query_diff.is_some());
+        assert_eq!(query_diff.unwrap().successful, 3);
+    }
+
+    // --- ErrorMetrics ---
+
+    #[test]
+    fn error_metrics_initial_empty() {
+        let metrics = ErrorMetrics::new();
+        let reports = metrics.to_state_reports(&None);
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn error_metrics_submit_and_report() {
+        let metrics = ErrorMetrics::new();
+        metrics.submit("ERR001".to_string());
+        metrics.submit("ERR001".to_string());
+        metrics.submit("ERR002".to_string());
+        let reports = metrics.to_state_reports(&None);
+        assert_eq!(reports.len(), 2);
+        let err001 = reports.iter().find(|r| r.code == "ERR001").unwrap();
+        assert_eq!(err001.count, 2);
+        let err002 = reports.iter().find(|r| r.code == "ERR002").unwrap();
+        assert_eq!(err002.count, 1);
+    }
+
+    #[test]
+    fn error_metrics_snapshot_and_diff() {
+        let mut metrics = ErrorMetrics::new();
+        metrics.submit("ERR001".to_string());
+        metrics.take_snapshot();
+        metrics.submit("ERR001".to_string());
+        metrics.submit("ERR001".to_string());
+        let diff = metrics.to_diff_reports(None);
+        let err = diff.iter().find(|r| r.code == "ERR001").unwrap();
+        assert_eq!(err.count, 2); // 3 total - 1 at snapshot = 2 delta
+    }
+
+    // --- ActionInfo ---
+
+    #[test]
+    fn action_info_default() {
+        let info = ActionInfo::default();
+        assert_eq!(info.get_successful(), 0);
+        assert_eq!(info.get_failed(), 0);
+        assert_eq!(info.get_attempted(), 0);
+    }
+
+    #[test]
+    fn action_info_submit() {
+        let info = ActionInfo::default();
+        info.submit_success();
+        info.submit_success();
+        info.submit_fail();
+        assert_eq!(info.get_successful(), 2);
+        assert_eq!(info.get_failed(), 1);
+        assert_eq!(info.get_attempted(), 3);
+    }
+
+    #[test]
+    fn action_info_clone() {
+        let info = ActionInfo::default();
+        info.submit_success();
+        info.submit_fail();
+        let cloned = info.clone();
+        assert_eq!(cloned.get_successful(), 1);
+        assert_eq!(cloned.get_failed(), 1);
+    }
+
+    // --- ErrorInfo ---
+
+    #[test]
+    fn error_info_default() {
+        let info = ErrorInfo::default();
+        assert_eq!(info.count, 0);
+    }
+
+    #[test]
+    fn error_info_submit() {
+        let mut info = ErrorInfo::new();
+        info.submit();
+        info.submit();
+        assert_eq!(info.count, 2);
+    }
+
+    // --- LoadKind ---
+
+    #[test]
+    fn load_kind_display() {
+        assert_eq!(format!("{}", LoadKind::SchemaTransactions), "schemaTransactionPeakCount");
+        assert_eq!(format!("{}", LoadKind::ReadTransactions), "readTransactionPeakCount");
+        assert_eq!(format!("{}", LoadKind::WriteTransactions), "writeTransactionPeakCount");
+    }
+
+    #[test]
+    fn load_kind_posthog_name() {
+        assert_eq!(LoadKind::SchemaTransactions.to_posthog_name(), "schema_transactions_peak_count");
+        assert_eq!(LoadKind::ReadTransactions.to_posthog_name(), "read_transactions_peak_count");
+        assert_eq!(LoadKind::WriteTransactions.to_posthog_name(), "write_transactions_peak_count");
+    }
+
+    // --- ActionKind ---
+
+    #[test]
+    fn action_kind_display() {
+        assert_eq!(format!("{}", ActionKind::ConnectionOpen), "CONNECTION_OPEN");
+        assert_eq!(format!("{}", ActionKind::TransactionQuery), "TRANSACTION_QUERY");
+    }
+
+    #[test]
+    fn action_kind_is_query() {
+        assert!(ActionKind::TransactionQuery.is_query());
+        assert!(ActionKind::OneshotQuery.is_query());
+        assert!(!ActionKind::ConnectionOpen.is_query());
+        assert!(!ActionKind::SignIn.is_query());
+    }
+
+    #[test]
+    fn action_kind_serde() {
+        let json = serde_json::to_string(&ActionKind::ConnectionOpen).unwrap();
+        assert_eq!(json, "\"CONNECTION_OPEN\"");
+    }
+
+    // --- get_delta ---
+
+    #[test]
+    fn get_delta_positive() {
+        assert_eq!(get_delta(10, 3), 7);
+    }
+
+    #[test]
+    fn get_delta_negative() {
+        assert_eq!(get_delta(3, 10), -7);
+    }
+
+    #[test]
+    fn get_delta_zero() {
+        assert_eq!(get_delta(5, 5), 0);
+    }
+
+    // --- SchemaLoadMetrics ---
+
+    #[test]
+    fn schema_load_metrics_to_report() {
+        let metrics = SchemaLoadMetrics { type_count: 42 };
+        let report = metrics.to_state_report();
+        assert_eq!(report.type_count, 42);
+    }
+
+    // --- DataLoadMetrics ---
+
+    #[test]
+    fn data_load_metrics_to_report() {
+        let metrics = DataLoadMetrics {
+            entity_count: 100,
+            relation_count: 50,
+            attribute_count: 200,
+            has_count: 150,
+            role_count: 30,
+            storage_in_bytes: 10240,
+            storage_key_count: 500,
+        };
+        let report = metrics.to_state_report();
+        assert_eq!(report.entity_count, 100);
+        assert_eq!(report.relation_count, 50);
+        assert_eq!(report.attribute_count, 200);
+        assert_eq!(report.has_count, 150);
+        assert_eq!(report.role_count, 30);
+        assert_eq!(report.storage_in_bytes, 10240);
+        assert_eq!(report.storage_key_count, 500);
+    }
+}

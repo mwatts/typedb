@@ -38,12 +38,12 @@ pub const fn increment_fixed<const SIZE: usize>(mut bytes: [u8; SIZE]) -> [u8; S
     while index > 0 {
         let (val, overflow) = bytes[index - 1].overflowing_add(1);
         bytes[index - 1] = val;
-        if overflow {
-            panic!("Overflow while incrementing array")
+        if !overflow {
+            return bytes;
         }
         index -= 1;
     }
-    bytes
+    panic!("Overflow while incrementing array")
 }
 
 #[derive(Debug)]
@@ -145,5 +145,157 @@ impl fmt::Display for Base64Formatter<'_> {
 impl fmt::Debug for Base64Formatter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.format())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn increment_single_byte_no_carry() {
+        let mut bytes = [0u8, 0, 0, 1];
+        increment(&mut bytes).unwrap();
+        assert_eq!(bytes, [0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn increment_with_carry() {
+        let mut bytes = [0u8, 0, 0, 255];
+        increment(&mut bytes).unwrap();
+        assert_eq!(bytes, [0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn increment_with_multi_carry() {
+        let mut bytes = [0u8, 0, 255, 255];
+        increment(&mut bytes).unwrap();
+        assert_eq!(bytes, [0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn increment_overflow_returns_error() {
+        let mut bytes = [255u8, 255, 255, 255];
+        let result = increment(&mut bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn increment_empty_slice_overflows() {
+        let mut bytes: [u8; 0] = [];
+        let result = increment(&mut bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn increment_single_byte() {
+        let mut bytes = [0u8];
+        increment(&mut bytes).unwrap();
+        assert_eq!(bytes, [1]);
+    }
+
+    #[test]
+    fn increment_fixed_simple() {
+        let result = increment_fixed([0u8, 0, 0, 1]);
+        assert_eq!(result, [0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn increment_fixed_with_carry() {
+        let result = increment_fixed([0u8, 0, 0, 255]);
+        assert_eq!(result, [0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn increment_fixed_with_multi_carry() {
+        let result = increment_fixed([0u8, 0, 255, 255]);
+        assert_eq!(result, [0, 1, 0, 0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Overflow")]
+    fn increment_fixed_overflow_panics() {
+        let _ = increment_fixed([255u8, 255, 255, 255]);
+    }
+
+    #[test]
+    fn hex_formatter_format_iid_empty() {
+        let formatter = HexBytesFormatter::borrowed(&[]);
+        assert_eq!(formatter.format_iid(), "0x");
+    }
+
+    #[test]
+    fn hex_formatter_format_iid_bytes() {
+        let formatter = HexBytesFormatter::borrowed(&[0x68, 0x65, 0x6c, 0x6c, 0x6f]);
+        assert_eq!(formatter.format_iid(), "0x68656c6c6f");
+    }
+
+    #[test]
+    fn hex_formatter_format_iid_leading_zeros() {
+        let formatter = HexBytesFormatter::borrowed(&[0x00, 0x01, 0x0a]);
+        assert_eq!(formatter.format_iid(), "0x00010a");
+    }
+
+    #[test]
+    fn hex_formatter_owned_and_borrowed_produce_same_output() {
+        let bytes = vec![0xab, 0xcd, 0xef];
+        let owned = HexBytesFormatter::owned(bytes.clone());
+        let borrowed = HexBytesFormatter::borrowed(&bytes);
+        assert_eq!(owned.format_iid(), borrowed.format_iid());
+    }
+
+    #[test]
+    fn hex_formatter_debug_output() {
+        let formatter = HexBytesFormatter::borrowed(&[0xaa, 0xbb, 0xcc, 0xdd]);
+        let debug = format!("{:?}", formatter);
+        assert_eq!(debug, "[AABB CCDD]");
+    }
+
+    #[test]
+    fn hex_formatter_debug_single_byte() {
+        let formatter = HexBytesFormatter::borrowed(&[0x0f]);
+        let debug = format!("{:?}", formatter);
+        assert_eq!(debug, "[0F]");
+    }
+
+    #[test]
+    fn base64_formatter_encode() {
+        let formatter = Base64Formatter::borrowed(b"hello");
+        assert_eq!(formatter.format(), "aGVsbG8=");
+    }
+
+    #[test]
+    fn base64_formatter_empty() {
+        let formatter = Base64Formatter::borrowed(&[]);
+        assert_eq!(formatter.format(), "");
+    }
+
+    #[test]
+    fn base64_formatter_owned_and_borrowed_match() {
+        let data = vec![1, 2, 3, 4, 5];
+        let owned = Base64Formatter::owned(data.clone());
+        let borrowed = Base64Formatter::borrowed(&data);
+        assert_eq!(owned.format(), borrowed.format());
+    }
+
+    #[test]
+    fn base64_formatter_debug_matches_format() {
+        let formatter = Base64Formatter::borrowed(b"test");
+        let debug_output = format!("{:?}", formatter);
+        assert_eq!(debug_output, formatter.format());
+    }
+
+    #[test]
+    fn constants_are_correct() {
+        assert_eq!(KB, 1024);
+        assert_eq!(MB, 1024 * 1024);
+        assert_eq!(GB, 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn bytes_error_display() {
+        let err = BytesError { kind: BytesErrorKind::IncrementOverflow {} };
+        let msg = format!("{}", err);
+        assert!(msg.contains("IncrementOverflow"));
     }
 }
