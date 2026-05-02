@@ -18,7 +18,7 @@ use resource::{constants::database::INTERNAL_DATABASE_PREFIX, internal_database_
 use storage::durability_client::WALClient;
 use tracing::{Level, debug, event, warn};
 
-use crate::{Database, DatabaseDeleteError, DatabaseOpenError, DatabaseResetError, database::DatabaseCreateError};
+use crate::{Database, DatabaseBackupError, DatabaseDeleteError, DatabaseOpenError, DatabaseResetError, database::DatabaseCreateError};
 
 type DatabasesMap = HashMap<String, Arc<Database<WALClient>>>;
 type Databases = RwLock<DatabasesMap>;
@@ -328,6 +328,15 @@ impl DatabaseManager {
 
     pub fn databases(&self) -> RwLockReadGuard<'_, HashMap<String, Arc<Database<WALClient>>>> {
         self.databases.read().unwrap()
+    }
+
+    pub fn backup_database(&self, name: &str, dest_path: &Path) -> Result<PathBuf, DatabaseBackupError> {
+        let db = self
+            .database(name)
+            .ok_or_else(|| DatabaseBackupError::NotFound { name: name.to_string() })?;
+        db.checkpoint_to(dest_path)
+            .map_err(|typedb_source| DatabaseBackupError::CheckpointFailed { name: name.to_string(), typedb_source })?;
+        Ok(dest_path.to_path_buf())
     }
 
     pub fn is_user_database(name: &str) -> bool {

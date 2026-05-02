@@ -250,18 +250,21 @@ pub struct CheckpointWriter {
 
 impl CheckpointWriter {
     pub fn new(storage_path: &Path) -> Result<Self, CheckpointCreateError> {
+        Self::new_at(&storage_path.join(CHECKPOINT_DIR_NAME))
+    }
+
+    pub fn new_at(checkpoint_parent_dir: &Path) -> Result<Self, CheckpointCreateError> {
         use CheckpointCreateError::CheckpointDirCreate;
 
-        let checkpoint_dir = storage_path.join(CHECKPOINT_DIR_NAME);
-        if !checkpoint_dir.exists() {
-            fs::create_dir_all(&checkpoint_dir)
-                .map_err(|error| CheckpointDirCreate { dir: checkpoint_dir.clone(), source: Arc::new(error) })?
+        if !checkpoint_parent_dir.exists() {
+            fs::create_dir_all(checkpoint_parent_dir)
+                .map_err(|error| CheckpointDirCreate { dir: checkpoint_parent_dir.to_path_buf(), source: Arc::new(error) })?
         }
 
-        let checkpoint_directory = checkpoint_dir.join(format!("{}", Utc::now().timestamp_micros()));
+        let checkpoint_directory = checkpoint_parent_dir.join(format!("{}", Utc::now().timestamp_micros()));
         let temporary_directory = checkpoint_directory.with_extension(TEMP_FILE_EXTENSION);
         fs::create_dir_all(&temporary_directory)
-            .map_err(|error| CheckpointDirCreate { dir: checkpoint_dir.clone(), source: Arc::new(error) })?;
+            .map_err(|error| CheckpointDirCreate { dir: checkpoint_parent_dir.to_path_buf(), source: Arc::new(error) })?;
 
         Ok(Self { checkpoint_directory, temporary_directory })
     }

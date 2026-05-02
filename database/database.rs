@@ -484,6 +484,15 @@ impl Database<WALClient> {
         checkpoint_storage(&self.name, &self.path, &self.storage)
     }
 
+    pub fn checkpoint_to(&self, dest_path: &Path) -> Result<(), CheckpointCreateError> {
+        debug!("Starting checkpoint for database {} to {dest_path:?}", self.name);
+        let checkpoint = CheckpointWriter::new_at(dest_path)?;
+        self.storage.checkpoint(&checkpoint)?;
+        checkpoint.finish()?;
+        debug!("Finished checkpoint for database {} to {dest_path:?}", self.name);
+        Ok(())
+    }
+
     #[allow(clippy::drop_non_drop)]
     pub fn delete(self) -> Result<(), DatabaseDeleteError> {
         trace!("Deleting database '{}'.", self.name);
@@ -709,5 +718,12 @@ typedb_error! {
             10,
             "Corruption warning: Database reset failed partway because the query cache is still in use."
         ),
+    }
+}
+
+typedb_error! {
+    pub DatabaseBackupError(component = "Database backup", prefix = "DBB") {
+        NotFound(1, "Database '{name}' not found.", name: String),
+        CheckpointFailed(2, "Checkpoint failed for database '{name}'.", name: String, typedb_source: CheckpointCreateError),
     }
 }
