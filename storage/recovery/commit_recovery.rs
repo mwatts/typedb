@@ -16,7 +16,7 @@ use kv::{
 use tracing::{event, trace, Level};
 
 use crate::{
-    MVCCStorage,
+    FromOperationsBuffer, MVCCStorage,
     durability_client::{DurabilityClient, DurabilityClientError, DurabilityRecord},
     isolation_manager::{IsolationManager, ValidatedCommit},
     keyspace::{KeyspaceError, Keyspaces},

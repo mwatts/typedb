@@ -13,6 +13,7 @@ use bytes::{byte_array::ByteArray, Bytes};
 use primitive::key_range::KeyRange;
 use resource::profile::StorageCounters;
 use storage::{
+    MVCCStorage,
     key_value::{StorageKey, StorageKeyReference},
     snapshot::{ReadableSnapshot, WritableSnapshot, iterator::SnapshotIteratorError},
 };

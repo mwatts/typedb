@@ -15,10 +15,10 @@ use std::{
     sync::Arc,
 };
 
-use bytes::{util::MB, Bytes};
+use bytes::Bytes;
 use error::{typedb_error, TypeDBError};
 use primitive::key_range::KeyRange;
-use resource::{constants::storage::ROCKSDB_CACHE_SIZE_MB, profile::StorageCounters};
+use resource::{constants::{common::MB, storage::ROCKSDB_CACHE_SIZE}, profile::StorageCounters};
 use rocksdb::{
     checkpoint::Checkpoint, BlockBasedIndexType, BlockBasedOptions, Cache, DBCompressionType, Options, ReadOptions,
     SliceTransform, WriteBatch, WriteOptions, DB,
@@ -103,7 +103,7 @@ impl RocksKVStore {
     }
 
     fn create_cache() -> Cache {
-        Cache::new_lru_cache((ROCKSDB_CACHE_SIZE_MB * MB) as usize)
+        Cache::new_lru_cache(ROCKSDB_CACHE_SIZE as usize)
     }
 
     fn create_open_options(cache: &Cache, prefix_length: Option<usize>) -> Options {
