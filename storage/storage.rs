@@ -66,13 +66,28 @@ pub mod durability_client;
 pub mod error;
 pub mod isolation_manager;
 pub mod iterator;
+#[cfg(feature = "rocks")]
 pub mod key_range;
 pub mod key_value;
+#[cfg(feature = "rocks")]
 pub mod keyspace;
+#[cfg(not(feature = "rocks"))]
+pub mod keyspace {
+    use crate::snapshot::pool::{Poolable, SinglePool};
+
+    #[derive(Default)]
+    pub struct IteratorPool;
+    impl IteratorPool {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+}
 pub mod record;
 pub mod recovery;
 pub mod sequence_number;
 pub mod snapshot;
+#[cfg(feature = "rocks")]
 mod write_batches;
 
 #[derive(Debug)]
