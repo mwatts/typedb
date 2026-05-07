@@ -16,7 +16,7 @@ use std::sync::Arc;
 use database::{
     database_manager::DatabaseManager,
     query::{execute_schema_query, execute_write_query_in_write},
-    transaction::{TransactionRead, TransactionSchema, TransactionWrite},
+    transaction::{CommitIntent, DataCommitIntent, SchemaCommitIntent, TransactionRead, TransactionSchema, TransactionWrite},
     Database,
 };
 use executor::ExecutionInterrupt;
@@ -33,7 +33,7 @@ fn main() {
 
     // Step 1: Create DatabaseManager (no gRPC, no server)
     println!("1. Creating DatabaseManager...");
-    let tmp_dir = create_tmp_dir();
+    let tmp_dir = create_tmp_dir("thyra-spike");
     let database_manager = DatabaseManager::new(&tmp_dir).expect("Failed to create DatabaseManager");
     println!("   OK — DatabaseManager created at {:?}", tmp_dir.as_ref());
 
@@ -62,8 +62,9 @@ fn main() {
     let (tx_schema, result) = execute_schema_query(tx_schema, schema_query, schema_query_str.to_string());
     result.expect("Schema query failed");
 
-    let (_profile, commit_result) = tx_schema.commit();
-    commit_result.expect("Schema commit failed");
+    let (mut tx_profile, commit_intent) = tx_schema.finalise();
+    let commit_intent = commit_intent.expect("Schema finalise failed");
+    commit_intent.commit(tx_profile.commit_profile()).expect("Schema commit failed");
     println!("   OK — schema defined and committed");
 
     // Step 4: Write transaction — insert data
@@ -87,8 +88,9 @@ fn main() {
     let answer = result.expect("Insert query failed");
     println!("   OK — insert executed (answer: {:?})", answer.query_options);
 
-    let (_profile, commit_result) = tx_write.commit();
-    commit_result.expect("Write commit failed");
+    let (mut tx_profile, commit_intent) = tx_write.finalise();
+    let commit_intent = commit_intent.expect("Write finalise failed");
+    commit_intent.commit(tx_profile.commit_profile()).expect("Write commit failed");
     println!("   OK — write committed");
 
     // Step 5: Read transaction — query data back

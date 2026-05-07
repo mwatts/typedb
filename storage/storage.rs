@@ -46,15 +46,12 @@ use tracing::trace;
 
 use crate::{
     durability_client::{DurabilityClient, DurabilityClientError},
-    error::{MVCCStorageError, MVCCStorageErrorKind},
+    error::MVCCStorageError,
     isolation_manager::{IsolationManager, ValidatedCommit},
     iterator::MVCCRangeIterator,
     key_value::{StorageKey, StorageKeyReference},
-    keyspace::{
-        IteratorPool, Keyspace, KeyspaceError, KeyspaceId, KeyspaceOpenError, KeyspaceSet, Keyspaces,
-        iterator::KeyspaceRangeIterator,
-    },
     record::{CommitRecord, LegacyCommitRecordV1, StatusRecord},
+    snapshot::buffer::OperationsBuffer,
     recovery::{
         checkpoint::{CheckpointCreateError, CheckpointLoadError, CheckpointReader, CheckpointWriter},
         commit_recovery::{StorageRecoveryError, apply_recovered, load_commit_data_from},
@@ -69,12 +66,14 @@ pub mod durability_client;
 pub mod error;
 pub mod isolation_manager;
 pub mod iterator;
+pub mod key_range;
 pub mod key_value;
 pub mod keyspace;
 pub mod record;
 pub mod recovery;
 pub mod sequence_number;
 pub mod snapshot;
+mod write_batches;
 
 #[derive(Debug)]
 pub struct MVCCStorage<Durability> {
@@ -862,6 +861,42 @@ impl FromOperationsBuffer for WriteBatches {
             }
         }
         write_batches
+    }
+}
+
+#[cfg(test)]
+mod tests_commit_records {
+    use bytes::byte_array::ByteArray;
+    use durability::wal::WAL;
+    use resource::profile::CommitProfile;
+    use test_utils::{create_tmp_storage_dir, init_logging};
+
+    use crate::{
+        Arc, MVCCStorage, SnapshotId,
+        durability_client::{DurabilityClient, WALClient},
+        key_value::StorageKeyArray,
+        record::{CommitRecord, CommitType, LegacyCommitRecordV1, StatusRecord},
+        sequence_number::SequenceNumber,
+        snapshot::{WriteSnapshot, buffer::OperationsBuffer},
+    };
+
+    macro_rules! test_keyspace_set {
+        {$($variant:ident => $id:literal : $name: literal),* $(,)?} => {
+            #[derive(Clone, Copy)]
+            enum TestKeyspaceSet { $($variant),* }
+            impl kv::keyspaces::KeyspaceSet for TestKeyspaceSet {
+                fn iter() -> impl Iterator<Item = Self> { [$(Self::$variant),*].into_iter() }
+                fn id(&self) -> kv::keyspaces::KeyspaceId {
+                    match *self { $(Self::$variant => kv::keyspaces::KeyspaceId($id)),* }
+                }
+                fn name(&self) -> &'static str {
+                    match *self { $(Self::$variant => $name),* }
+                }
+                fn prefix_length(&self) -> Option<usize> {
+                    None
+                }
+            }
+        };
     }
 
     #[test]

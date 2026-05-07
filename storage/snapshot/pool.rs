@@ -9,6 +9,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub trait Poolable {}
+
 #[derive(Debug)]
 pub struct SinglePool<T> {
     pool: Arc<Mutex<Vec<T>>>,

@@ -19,7 +19,6 @@ use crate::{
     FromOperationsBuffer, MVCCStorage,
     durability_client::{DurabilityClient, DurabilityClientError, DurabilityRecord},
     isolation_manager::{IsolationManager, ValidatedCommit},
-    keyspace::{KeyspaceError, Keyspaces},
     record::{CommitRecord, LegacyCommitRecordV1, StatusRecord},
     sequence_number::SequenceNumber,
 };
